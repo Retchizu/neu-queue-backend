@@ -24,7 +24,7 @@ export const addCounter = async (req: AuthRequest, res: Response) => {
     }
     const receiver = await auth.getUser(req.user.uid);
     const displayName = receiver.displayName;
-    const stationRef = realtimeDb.ref(`station/${stationID}`);
+    const stationRef = realtimeDb.ref(`stations/${stationID}`);
     const stationData = await stationRef.get();
     await recordLog(
       req.user.uid,
