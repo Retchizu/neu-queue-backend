@@ -216,7 +216,13 @@ export const updateStation = async (req: AuthRequest, res: Response) => {
     );
     res
       .status(200)
-      .json({ message: `${stationData.name} updated successfully` });
+      .json({ message: `${stationData.name} updated successfully`, station: {
+        id: stationID,
+        name,
+        description,
+        activated,
+        type,
+      }});
   } catch (error) {
     if (error instanceof ZodError) {
       res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
