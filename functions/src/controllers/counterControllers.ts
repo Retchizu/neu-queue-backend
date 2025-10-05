@@ -31,7 +31,12 @@ export const addCounter = async (req: AuthRequest, res: Response) => {
       ActionType.ADD_COUNTER,
       `${displayName} added counter: ${counterNumber} in ${stationData.val().name}`
     );
-    res.status(201).json({ message: "Counter added Successfully" });
+    res.status(201).json({ message: "Counter added Successfully", counter: {
+      id: counterRef.key,
+      counterNumber,
+      employeeCashier: null,
+      stationID,
+    } });
   } catch (error) {
     if (error instanceof ZodError) {
       res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
@@ -183,6 +188,12 @@ export const updateCounter = async (req: AuthRequest, res: Response) => {
       message: `${snapshot.val().counterNumber} has been updated to ${
         updatedSnapshot.val().counterNumber
       }`,
+      counter: {
+        id: counterID,
+        counterNumber: updatedSnapshot.val().counterNumber,
+        employeeCashier: updatedSnapshot.val().uid || null,
+        stationID: updatedSnapshot.val().stationID,
+      },
     });
   } catch (error) {
     if (error instanceof ZodError) {
