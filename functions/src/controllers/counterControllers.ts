@@ -101,7 +101,7 @@ export const deleteCounter = async (req: AuthRequest, res: Response) => {
       res.status(401).json({message: "User ID is missing!"});
       return;
     }
-    const stationRef = realtimeDb.ref(`station/${stationID}`);
+    const stationRef = realtimeDb.ref(`stations/${stationID}`);
     const stationData = await stationRef.get();
     const receiver = await auth.getUser(req.user.uid);
     const displayName = receiver.displayName;
