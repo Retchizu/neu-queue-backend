@@ -41,7 +41,13 @@ export const addStation = async (req: AuthRequest, res: Response) => {
       ActionType.ADD_STATION,
       `${displayName} Added station ${name}`
     );
-    res.status(201).json({ message: "Station added successfully." });
+    res.status(201).json({ message: "Station added successfully.", station: {
+      id: stationID,
+      name,
+      description,
+      activated,
+      type,
+    }});
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
   }
