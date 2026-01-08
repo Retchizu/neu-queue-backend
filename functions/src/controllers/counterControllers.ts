@@ -1,205 +1,218 @@
-import { Response } from "express";
-import { addCounterSchema } from "../zod-schemas/addCounter";
-import { auth, realtimeDb } from "../config/firebaseConfig";
-import AuthRequest from "../types/AuthRequest";
+import { Request, Response } from "express";
+import { counterSchema } from "@/zod-schemas/counterSchema";
+import { auth, firestoreDb } from "../config/firebaseConfig";
 import { recordLog } from "../utils/recordLog";
 import { ActionType } from "../types/activityLog";
 import { ZodError } from "zod";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import Counter from "@/types/counter";
 
-export const addCounter = async (req: AuthRequest, res: Response) => {
+export const addCounter = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { stationID } = req.params;
-    const parsedBody = addCounterSchema.parse(req.body);
-    const { counterNumber } = parsedBody;
+    const {stationId, number} = counterSchema.parse(req.body);
 
-    const counterRef = realtimeDb.ref("counters").push();
-    await counterRef.set({
-      counterNumber: counterNumber,
-      employeeCashier: null,
-      stationID: stationID,
-    });
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
+    // check if station is existing
+    const stationRef = firestoreDb.collection("stations").doc(stationId);
+    const stationSnapshot = await stationRef.get();
+
+    if (!stationSnapshot.exists) {
+      res.status(404).json({ message: "Station not found."});
       return;
     }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
-    const stationRef = realtimeDb.ref(`stations/${stationID}`);
-    const stationData = await stationRef.get();
+
+    const counterRef = firestoreDb.collection("counters").doc();
+    const counter: Counter = {
+      number: number,
+      stationId: stationId,
+      createdAt: FieldValue.serverTimestamp() as Timestamp,
+      updatedAt: FieldValue.serverTimestamp() as Timestamp,
+    };
+
+    await counterRef.set(counter);
+
+    counter.id = stationRef.id;
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
     await recordLog(
-      req.user.uid,
+      user.uid,
       ActionType.ADD_COUNTER,
-      `${displayName} added counter: ${counterNumber} in ${stationData.val().name}`
+      `${displayName} added counter: ${number} in ${stationSnapshot.data()!.name}`
     );
-    res.status(201).json({ message: "Counter added Successfully", counter: {
-      id: counterRef.key,
-      counterNumber,
-      employeeCashier: null,
-      stationID,
-    } });
+
+    res.status(201).json({ message: "Counter added Successfully", counter });
+    return;
   } catch (error) {
     if (error instanceof ZodError) {
       res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
+      return;
     } else {
       res.status(500).json({ message: (error as Error).message });
+      return;
     }
   }
 };
 
-export const getCounters = async (req: AuthRequest, res: Response) => {
+export const getCounters = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { stationID } = req.params;
-    const counterRef = realtimeDb.ref("counters");
-    const snapshot = await counterRef.get();
-    const counters = snapshot.val();
+    const limit = Number(req.query.limit) || 10;
+    const {stationId, cursor} = req.query;
 
-    type Counter = {
-      counterNumber: string;
-      uid: string | null,
-      stationID: string;
-    };
-    const counterList = Object.entries(counters ?? [])
-      .filter(([, data]) => (data as Counter).stationID === stationID)
-      .map(([id, data]) => ({
-        id,
-        ...(data as Counter),
-      }));
-    res.status(200).json({ counterList: counterList });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-export const deleteCounter = async (req: AuthRequest, res: Response) => {
-  try {
-    const { stationID, counterID } = req.params;
-    if (!counterID || !stationID) {
-      res.status(400).json({ message: "Missing counter ID or station ID" });
+    if (!stationId) {
+      res.status(404).json({ message: "Station not found."});
       return;
     }
 
-    const counterRef = realtimeDb.ref(`counters/${counterID}`);
-    const snapshot = await counterRef.get();
-    if (!snapshot.exists()) {
+    let counterRef = firestoreDb.collection("counters").orderBy("number", "asc").limit(limit);
+
+    if (cursor) {
+      const lastDoc = await firestoreDb.collection("counters").doc((cursor as string)).get();
+      if (lastDoc.exists) {
+        counterRef = counterRef.startAfter(cursor);
+      }
+    }
+
+    const counterSnapshot = await counterRef.get();
+    const counters: Counter[] = counterSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }) as Counter);
+
+    const snapshotLength = counterSnapshot.docs.length;
+    const nextCursor = snapshotLength > 0 ? counterSnapshot.docs[snapshotLength - 1].id : null;
+    res.status(200).json({ counters, nextCursor });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
+
+export const updateCounter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { counterId } = req.params;
+    if (!counterId) {
+      res.status(400).json({ message: "Missing counter Id" });
+      return;
+    }
+    const parsedBody = counterSchema.parse(req.body);
+    const { number, stationId, cashierUid} = parsedBody;
+
+    if (cashierUid) {
+      res.status(409).json({ message: "Can not update an active counter"});
+      return;
+    }
+
+    const stationRef = firestoreDb.collection("stations").doc(stationId);
+    const stationSnapshot = await stationRef.get();
+
+    if (!stationSnapshot.exists) {
+      res.status(404).json({ message: "Station not found."});
+      return;
+    }
+    const counterRef = firestoreDb.collection("counters").doc(counterId);
+    const counterSnapshot = await counterRef.get();
+    if (!counterSnapshot.exists) {
       res.status(404).json({ message: "Counter not found" });
       return;
     }
-    const counterData = snapshot.val();
-    const updates: Record<string, null> = {};
 
-    if (counterData?.uid) {
-      updates[`users/${counterData.uid}/counterID`] = null;
-    }
+    const doesCounterBelongToStation = stationSnapshot.data()!.id === counterSnapshot.data()!.stationId;
 
-    // Remove the counter
-    updates[`counters/${counterID}`] = null;
-
-    // Apply all updates in one batch
-    await realtimeDb.ref().update(updates);
-
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
+    if (!doesCounterBelongToStation) {
+      res.status(400).json({ message: "Station and Counter mismatch."});
       return;
     }
-    const stationRef = realtimeDb.ref(`stations/${stationID}`);
-    const stationData = await stationRef.get();
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
+
+    const updateData: Partial<Counter> = {
+      updatedAt: FieldValue.serverTimestamp() as Timestamp,
+    };
+
+    if (number !== undefined) {
+      updateData.number = number;
+    }
+
+    await counterRef.update(updateData);
+
+    const updatedSnapshot = await counterRef.get();
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
     await recordLog(
-      req.user.uid,
+      user.uid,
+      ActionType.EDIT_COUNTER,
+      `${displayName} updates counter ${counterSnapshot.data()!.number} from station ${stationSnapshot.data()!.name}`
+    );
+
+    const counter: Counter = {
+      id: counterRef.id,
+      number: updateData.number || number,
+      stationId: updatedSnapshot.data()!.stationId as string,
+      cashierUid: updatedSnapshot.data()!.cashierUid as string || undefined,
+      createdAt: updatedSnapshot.data()!.createdAt,
+      updatedAt: updateData.updatedAt!,
+    };
+
+    res.status(200).json({
+      message: `${counterSnapshot.data()!.number} has been updated to ${
+        updatedSnapshot.data()!.number
+      }`,
+      counter,
+    });
+    return;
+  } catch (error) {
+    if (error instanceof ZodError) {
+      res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
+      return;
+    } else {
+      res.status(500).json({ message: (error as Error).message });
+      return;
+    }
+  }
+};
+
+
+export const deleteCounter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { counterId } = req.params;
+    const {stationId, cashierUid} = counterSchema.parse(req.body);
+
+    if (cashierUid) {
+      res.status(409).json({ message: "Can not delete an active counter."});
+      return;
+    }
+
+    if (!counterId) {
+      res.status(400).json({ message: "Missing counter Id" });
+      return;
+    }
+
+    const counterRef = firestoreDb.collection("counters").doc(counterId);
+    const counterSnapshot = await counterRef.get();
+    if (!counterSnapshot.exists) {
+      res.status(404).json({ message: "Counter not found" });
+      return;
+    }
+
+    await counterRef.delete();
+
+    const stationRef = firestoreDb.collection("stations").doc(stationId);
+    const stationSnapshot = await stationRef.get();
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+    await recordLog(
+      user.uid,
       ActionType.DELETE_COUNTER,
-      `${displayName} deleted counter ${counterData.counterNumber} from station ${stationData.val().name}`
+      `${displayName} deleted counter ${counterSnapshot.data()!.number} from station ${stationSnapshot.data()!.name}`
     );
     res
       .status(200)
-      .json({ message: `${snapshot.val().counterNumber} has been removed` });
+      .json({ message: `${counterSnapshot.data()!.number} has been removed` });
+    return;
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-export const updateCounter = async (req: AuthRequest, res: Response) => {
-  try {
-    const { stationID, counterID } = req.params;
-    if (!counterID || !stationID) {
-      res.status(400).json({ message: "Missing counter ID or station ID" });
-      return;
-    }
-    const parsedBody = addCounterSchema.parse(req.body);
-    const { counterNumber, employeeUID } = parsedBody;
-    const counterRef = realtimeDb.ref(`counters/${counterID}`);
-    const snapshot = await counterRef.get();
-    if (!snapshot.exists()) {
-      res.status(404).json({ message: "Counter not found" });
-      return;
-    }
-
-    const previousEmployeeUID = snapshot.val().uid;
-    await counterRef.update({
-      counterNumber: counterNumber,
-      uid: employeeUID || null,
-      stationID: stationID,
-    });
-
-    if (employeeUID) {
-      const employeeRef = realtimeDb.ref(`users/${employeeUID}`);
-      const employeeSnapshot = await employeeRef.get();
-      if (!employeeSnapshot.exists()) {
-        res.status(404).json({ message: "Employee not found" });
-        return;
-      }
-      if (employeeSnapshot.val().role !== "cashier") {
-        res
-          .status(403)
-          .json({
-            message:
-              "You can only assign an employee of cashier role to counter",
-          });
-        return;
-      }
-      if (employeeSnapshot.val().counterID) {
-        res.status(400).json({ message: "This employee is already assigned to another counter" });
-        return;
-      }
-      await employeeRef.update({
-        role: employeeSnapshot.val().role,
-        counterID: counterID,
-      });
-    } else if (previousEmployeeUID) {
-      const prevEmployeeRef = realtimeDb.ref(`users/${previousEmployeeUID}`);
-      await prevEmployeeRef.update({ counterID: null });
-    }
-
-    const updatedSnapshot = await counterRef.get();
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
-      return;
-    }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
-    const stationRef = realtimeDb.ref(`stations/${stationID}`);
-    const stationData = await stationRef.get();
-    await recordLog(
-      req.user.uid,
-      ActionType.EDIT_COUNTER,
-      `${displayName} updates counter ${snapshot.val().counterNumber} from station ${stationData.val().name}`
-    );
-    res.status(200).json({
-      message: `${snapshot.val().counterNumber} has been updated to ${
-        updatedSnapshot.val().counterNumber
-      }`,
-      counter: {
-        id: counterID,
-        counterNumber: updatedSnapshot.val().counterNumber,
-        employeeCashier: updatedSnapshot.val().uid || null,
-        stationID: updatedSnapshot.val().stationID,
-      },
-    });
-  } catch (error) {
-    if (error instanceof ZodError) {
-      res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
-    } else {
-      res.status(500).json({ message: (error as Error).message });
-    }
+    return;
   }
 };

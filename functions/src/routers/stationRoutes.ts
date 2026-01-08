@@ -1,22 +1,24 @@
 import { Router } from "express";
-import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
 import { verifyRole } from "../middlewares/verifyRole";
 import {
   addStation,
   deleteStation,
+  getStation,
   getStations,
   updateStation,
-} from "../controllers/stationControllers";
+} from "@/controllers/stationControllers";
 import { checkStationActivation } from "../middlewares/checkStationActivation";
+import { verifyAuthTokenAndDomain } from "@/middlewares/verifyAuthTokenAndDomain";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();
 
 router.use(verifyAuthTokenAndDomain, verifyRole(["admin", "superAdmin"]));
 
-router.post("/add", addStation);
-router.get("/get", getStations);
-router.delete("/delete/:stationID", checkStationActivation, deleteStation);
-router.put("/update/:stationID", updateStation);
+router.post("/stations", addStation);
+router.get("/stations", getStations);
+router.get("/stations/:stationId", getStation);
+router.delete("/delete/:stationId", checkStationActivation, deleteStation);
+router.put("/stations/:stationId", updateStation);
 
 export default router;

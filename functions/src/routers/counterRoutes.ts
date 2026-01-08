@@ -7,15 +7,14 @@ import {
   getCounters,
   updateCounter,
 } from "../controllers/counterControllers";
-import { checkStationActivation } from "../middlewares/checkStationActivation";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();
 
 router.use(verifyAuthTokenAndDomain, verifyRole(["admin", "superAdmin"]));
 
-router.post("/add/:stationID", addCounter);
-router.get("/get/:stationID", getCounters);
-router.delete("/delete/:stationID/:counterID", deleteCounter);
-router.put("/update/:stationID/:counterID", checkStationActivation, updateCounter);
+router.post("/counters", addCounter);
+router.get("/counters", getCounters);
+router.delete("/counters/:counterId", deleteCounter);
+router.put("/counters/:counterId", updateCounter);
 export default router;

@@ -1,8 +1,8 @@
 import { Response } from "express";
 import AuthRequest from "../types/AuthRequest";
 import { auth, firestoreDb, realtimeDb } from "../config/firebaseConfig";
-import CashierType from "../types/CashierType";
-import Counter from "../types/Counter";
+import CashierType from "../types/purpose";
+import Counter from "../types/counter";
 import { recordLog } from "../utils/recordLog";
 import { ActionType } from "../types/activityLog";
 import { sendEmail } from "../utils/sendEmail";
