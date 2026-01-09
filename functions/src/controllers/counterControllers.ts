@@ -279,3 +279,90 @@ export const enterCounter = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+export const exitCounter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { counterId } = req.params;
+
+    if (!counterId) {
+      res.status(400).json({ message: "Missing counter Id" });
+      return;
+    }
+
+    const counterRef = firestoreDb.collection("counters").doc(counterId);
+    const counterSnapshot = await counterRef.get();
+
+    if (!counterSnapshot.exists) {
+      res.status(404).json({ message: "Counter not found" });
+      return;
+    }
+
+    const counterData = counterSnapshot.data() as Counter;
+
+    // Check if counter is currently occupied by the requesting cashier
+    if (!counterData.cashierUid) {
+      res.status(400).json({ message: "Counter is not currently occupied" });
+      return;
+    }
+
+    // Check if the requesting user is the one occupying the counter
+    if (counterData.cashierUid !== req.user!.uid) {
+      res.status(403).json({ message: "You are not assigned to this counter" });
+      return;
+    }
+
+    // Check if there are other active counters in the same station
+    const activeCountersSnapshot = await firestoreDb
+      .collection("counters")
+      .where("stationId", "==", counterData.stationId)
+      .where("cashierUid", "!=", null)
+      .get();
+
+    // Filter out the current counter from the active counters
+    const otherActiveCounters = activeCountersSnapshot.docs.filter(
+      (doc) => doc.id !== counterId && doc.data().cashierUid !== null
+    );
+
+    // Prevent exit if there are no other active counters in the station
+    if (otherActiveCounters.length === 0) {
+      res.status(409).json({
+        message: "Cannot exit counter. There are no other active counters serving in this station.",
+      });
+      return;
+    }
+
+    // Update counter by removing cashier UID
+    await counterRef.update({
+      cashierUid: null,
+      updatedAt: FieldValue.serverTimestamp() as Timestamp,
+    });
+
+    const updatedSnapshot = await counterRef.get();
+    const updatedCounter: Counter = {
+      id: counterRef.id,
+      ...updatedSnapshot.data(),
+    } as Counter;
+
+    // Get station info for logging
+    const stationRef = firestoreDb.collection("stations").doc(counterData.stationId);
+    const stationSnapshot = await stationRef.get();
+    const stationName = stationSnapshot.exists ? stationSnapshot.data()!.name : "Unknown";
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
+    await recordLog(
+      user.uid,
+      ActionType.EDIT_COUNTER,
+      `${displayName} exited counter ${counterData.number} at station ${stationName}`
+    );
+
+    res.status(200).json({
+      message: `Successfully exited counter ${counterData.number}`,
+      counter: updatedCounter,
+    });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};

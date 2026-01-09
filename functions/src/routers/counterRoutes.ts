@@ -7,17 +7,20 @@ import {
     enterCounter,
     getCounters,
     updateCounter,
+    exitCounter,
 } from "../controllers/counterControllers";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();
 
-router.use(verifyAuthTokenAndDomain, verifyRole(["admin", "superAdmin"]));
+router.use(verifyAuthTokenAndDomain);
 
-router.post("/counters", addCounter);
-router.get("/counters", getCounters);
-router.delete("/counters/:counterId", deleteCounter);
-router.put("/counters/:counterId", updateCounter);
-router.post("/counters/:counterId/enter", enterCounter);
+router.post("/counters", verifyRole(["admin", "superAdmin"]), addCounter);
+router.get("/counters", verifyRole(["admin", "superAdmin"]), getCounters);
+router.delete("/counters/:counterId", verifyRole(["admin", "superAdmin"]), deleteCounter);
+router.put("/counters/:counterId", verifyRole(["admin", "superAdmin"]), updateCounter);
+router.post("/counters/:counterId/enter", verifyRole(["cashier"]), enterCounter);
+router.post("/counters/:counterId/exit", verifyRole(["cashier"]), exitCounter);
+
 
 export default router;
