@@ -1,11 +1,15 @@
-import { NextFunction, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { auth } from "../config/firebaseConfig";
-import AuthRequest from "../types/AuthRequest";
 import { FirebaseAuthError } from "firebase-admin/auth";
 
-export const verifyAuthTokenAndDomain = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const verifyAuthTokenAndDomain = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ message: "Invalid or missing token"});
+      return;
+    }
+    const token = authHeader.split(" ")[1];
     if (!token) {
       res.status(401).json({message: "Invalid or missing token"});
       return;
@@ -21,22 +25,24 @@ export const verifyAuthTokenAndDomain = async (req: AuthRequest, res: Response, 
     }
     req.user = {...decodedToken, role: decodedToken.role};
     next();
+    return;
   } catch (error) {
     switch ((error as FirebaseAuthError).code) {
     case "auth/id-token-expired":
       res.status(401).json({ message: "Token expired. Please sign in again." });
-      break;
+      return;
     case "auth/argument-error":
       res.status(400).json({ message: "Invalid token format." });
-      break;
+      return;
     case "auth/user-disabled":
       res.status(403).json({ message: "User account is disabled." });
-      break;
+      return;
     case "auth/user-not-found":
       res.status(404).json({ message: "User not found." });
-      break;
+      return;
     default:
       res.status(500).json({ message: `Authentication failed: ${(error as Error).message}`});
+      return;
     }
   }
 };

@@ -1,233 +1,237 @@
-import { Response } from "express";
-import AuthRequest from "../types/AuthRequest";
-import { addCashierSchema } from "../zod-schemas/addCashier";
-import { auth, realtimeDb } from "../config/firebaseConfig";
-import CashierType from "../types/CashierType";
-import Station from "../types/Station";
-import Counter from "../types/Counter";
-import { recordLog } from "../utils/recordLog";
-import { ActionType } from "../types/activityLog";
+import { Request, Response } from "express";
+import { stationSchema } from "@/zod-schemas/station-schema";
+import { auth, firestoreDb } from "@/config/firebaseConfig";
+import Station from "@/types/station";
+import { recordLog } from "@/utils/recordLog";
+import { ActionType } from "@/types/activity-log";
 import { ZodError } from "zod";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
-export const addStation = async (req: AuthRequest, res: Response) => {
+export const addStation = async (req: Request, res: Response): Promise<void> => {
   try {
-    const parsedBody = addCashierSchema.parse(req.body);
-    const { name, description, activated, type } = parsedBody;
+    const parsedBody = stationSchema.parse(req.body);
+    const { name, description, type } = parsedBody;
 
-    const stationRef = realtimeDb.ref("stations").push();
-    const stationID = stationRef.key;
-    await stationRef.set({
-      name: name,
-      description: description,
-      activated: activated,
-      type: type,
-    });
 
-    const currentNumberRef = realtimeDb.ref(
-      `current-queue-number/${stationID}`
-    );
-    await currentNumberRef.set({
-      currentNumber: 1,
-    });
+    const stationRef = firestoreDb.collection("stations");
+    const stationSnapshot = await stationRef.get();
 
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
+    const doesStationExists =
+      stationSnapshot.docs.some((station) => (station.data() as Station).name.toLowerCase() === name.toLowerCase());
+
+    if (doesStationExists) {
+      res.status(409).json({ message: `Station with ${name} already exists.`});
       return;
     }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
+
+    await stationRef.doc().set({
+      name: name,
+      description: description,
+      type: type,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
     await recordLog(
-      req.user.uid,
+      user.uid,
       ActionType.ADD_STATION,
       `${displayName} Added station ${name}`
     );
     res.status(201).json({ message: "Station added successfully.", station: {
-      id: stationID,
-      name,
-      description,
-      activated,
-      type,
+      id: stationRef.id,
+      ...parsedBody,
     }});
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-export const getStations = async (req: AuthRequest, res: Response) => {
-  try {
-    const stationRef = realtimeDb.ref("stations");
-    const snapshot = await stationRef.get();
-    const cashiers = snapshot.val();
-    const cashierLocationList = Object.entries(cashiers ?? []).map(
-      ([id, data]) => ({
-        id,
-        ...(data as { name: string; description: string; type: CashierType }),
-      })
-    );
-
-    res.status(200).json({ cashierLocationList: cashierLocationList });
+    return;
   } catch (error) {
     if (error instanceof ZodError) {
       res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
+      return;
     } else {
       res.status(500).json({ message: (error as Error).message });
+      return;
     }
   }
 };
 
-export const deleteStation = async (req: AuthRequest, res: Response) => {
+export const getStations = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { stationID } = req.params;
-    const stationRef = realtimeDb.ref(`stations/${stationID}`);
-    const snapshot = await stationRef.get();
-    if (!snapshot.exists()) {
+    const limit = Number(req.query.limit) || 10;
+    const cursor = req.query.cursor as string;
+
+    let stationRef = firestoreDb.collection("stations")
+      .orderBy("name", "asc")
+      .limit(limit);
+
+    if (cursor) {
+      const lastDoc = await firestoreDb.collection("stations").doc(cursor).get();
+      if (lastDoc.exists) {
+        stationRef = stationRef.startAfter(lastDoc);
+      }
+    }
+    const stationsSnapshot = await stationRef.get();
+    const stations: Station[] = stationsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }) as Station);
+
+    const nextCursor =
+      stationsSnapshot.docs.length > 0 ?
+        stationsSnapshot.docs[stationsSnapshot.docs.length - 1].id :
+        null;
+
+    res.status(200).json({
+      stations,
+      nextCursor,
+    });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
+
+export const getStation = async (req: Request, res: Response) => {
+  try {
+    const {stationId} = req.params;
+    const stationRef = firestoreDb.collection("station").doc(stationId);
+    const stationSnapshot = await stationRef.get();
+
+    if (!stationSnapshot.exists) {
       res.status(404).json({ message: "Station not found" });
       return;
     }
-    const stationData = snapshot.val();
-    if (stationData.activated) {
-      throw new Error("Deactivate the station before deleting");
-    }
+    const station: Station = {
+      id: stationSnapshot.id,
+      ...stationSnapshot.data(),
+    } as Station;
 
-    const counterRef = realtimeDb.ref("counters");
-    const counterSnapshot = await counterRef.get();
-    const counters = counterSnapshot.val() ?? {};
+    res.status(200).json({ station });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
 
-    const usersRef = realtimeDb.ref("users");
-    const usersSnapshot = await usersRef.get();
-    const users = usersSnapshot.val() ?? {};
+export const updateStation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { stationId } = req.params;
+    const parsedBody = stationSchema.parse(req.body);
+    const { name, description, type } = parsedBody;
 
-    const stationCounters = Object.keys(counters).filter(
-      (counterID) => counters[counterID].stationID === stationID
-    );
+    const stationRef = firestoreDb.collection("stations");
+    const stationListSnapshot = await stationRef.get();
 
-    const updates: Record<string, null> = {};
-    stationCounters.forEach((counterID) => {
-      const counterData = counters[counterID];
+    const doesStationExists =
+      stationListSnapshot.docs.some((station) => (station.data() as Station).name.toLowerCase() === name.toLowerCase());
 
-      if (counterData.uid && users[counterData.uid]) {
-        updates[`users/${counterData.uid}/counterID`] = null; // Remove counterID from cashier
-      }
-
-      updates[`counters/${counterID}`] = null; // Delete counter
-    });
-
-    // Delete station and current queue number
-    updates[`stations/${stationID}`] = null;
-    updates[`current-queue-number/${stationID}`] = null;
-
-    // Apply all updates in one batch
-    await realtimeDb.ref().update(updates);
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
+    if (doesStationExists) {
+      res.status(409).json({ message: `Station with ${name} already exists.`});
       return;
     }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
+
+    const stationSnapshot = await stationRef.doc(stationId).get();
+    if (!stationSnapshot.exists) {
+      res.status(404).json({ message: "Station not found" });
+      return;
+    }
+
+
+    const updateData: Partial<Station> = {
+      updatedAt: FieldValue.serverTimestamp() as Timestamp,
+    };
+
+    if (parsedBody.name !== undefined) {
+      updateData.name = name;
+    }
+    if (parsedBody.type !== undefined) {
+      updateData.type = type;
+    }
+    if (parsedBody.description !== undefined) {
+      updateData.description = description;
+    }
+
+    await stationRef.doc(stationId).update(updateData);
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
     await recordLog(
-      req.user.uid,
+      user.uid,
+      ActionType.EDIT_STATION,
+      `${displayName} updates station ${name}`
+    );
+
+    const updatedStationSnapshot = await stationRef.doc(stationId).get();
+    const station: Station = {
+      id: updatedStationSnapshot.id,
+      ...updatedStationSnapshot.data(),
+    } as Station;
+
+
+    res.status(200).json({ station });
+    return;
+  } catch (error) {
+    if (error instanceof ZodError) {
+      res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
+      return;
+    } else {
+      res.status(500).json({ message: (error as Error).message });
+      return;
+    }
+  }
+};
+
+export const deleteStation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { stationId } = req.params;
+    const stationRef = firestoreDb.collection("stations").doc(stationId);
+    const stationSnapshot = await stationRef.get();
+
+    if (!stationSnapshot.exists) {
+      res.status(404).json({ message: "Station not found" });
+      return;
+    }
+    const station = stationSnapshot.data();
+
+    const countersRef = firestoreDb.collection("counters");
+    const countersSnapshot = await countersRef.where("stationId", "==", stationId).get();
+
+    const hasActiveCounter = countersSnapshot.docs.some(
+      (counterDoc) => {
+        const counterData = counterDoc.data();
+        return counterData.cashierUid !== null && counterData.cashierUid !== undefined;
+      }
+    );
+
+    if (hasActiveCounter) {
+      res.status(409).json({
+        message: "Cannot delete station. There are active counters with assigned cashiers.",
+      });
+      return;
+    }
+
+    await stationRef.delete();
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
+    await recordLog(
+      user.uid,
       ActionType.DELETE_STATION,
-      `${displayName} deletes station ${stationData.name}`
+      `${displayName} deletes station ${station!.name}`
     );
     res
       .status(200)
       .json({
-        message: `${snapshot.val().name} has been deleted successfully`,
+        message: `${station} has been deleted successfully`,
       });
+    return;
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-export const updateStation = async (req: AuthRequest, res: Response) => {
-  try {
-    const { stationID } = req.params;
-    const parsedBody = addCashierSchema.parse(req.body);
-    const { name, description, activated, type } = parsedBody;
-    const stationRef = realtimeDb.ref(`stations/${stationID}`);
-    const stationSnapshot = await stationRef.get();
-    if (!stationSnapshot.exists()) {
-      res.status(404).json({ message: "Station not found" });
-      return;
-    }
-    const stationData = stationSnapshot.val() as Station;
-    const counterRef = realtimeDb.ref("counters");
-    const counterSnapshot = await counterRef
-      .orderByChild("stationID")
-      .equalTo(stationID)
-      .get();
-
-    const counters: Record<string, Counter> = counterSnapshot.exists() ? counterSnapshot.val() : {};
-    const hasServingCounter = Object.values(counters).some(
-      (counter) => counter.serving && counter.serving.trim() !== ""
-    );
-    const hasAssignedCashier = Object.values(counters).some(
-      (counter) => counter.uid && counter.uid.trim() !== ""
-    );
-
-    if (stationData.activated && activated === false) {
-      if (hasServingCounter) {
-        res
-          .status(400)
-          .json({
-            message:
-              "Cannot deactivate station while counters are serving customers.",
-          });
-        return;
-      }
-    }
-
-    if (!stationData.activated && activated === true) {
-      if (Object.keys(counters).length === 0) {
-        res
-          .status(400)
-          .json({
-            message: "Cannot activate station without counters assigned.",
-          });
-        return;
-      }
-      if (!hasAssignedCashier) {
-        res
-          .status(400)
-          .json({
-            message: "Cannot activate station without an assigned cashier.",
-          });
-        return;
-      }
-    }
-    await stationRef.update({
-      name: name,
-      description: description,
-      type: type,
-      activated: activated,
-    });
-
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
-      return;
-    }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
-
-    await recordLog(
-      req.user.uid,
-      ActionType.EDIT_STATION,
-      `${displayName} updates station ${stationData.name}`
-    );
-    res
-      .status(200)
-      .json({ message: `${stationData.name} updated successfully`, station: {
-        id: stationID,
-        name,
-        description,
-        activated,
-        type,
-      }});
-  } catch (error) {
-    if (error instanceof ZodError) {
-      res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
-    } else {
-      res.status(500).json({ message: (error as Error).message });
-    }
+    return;
   }
 };
