@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
-import { stationSchema } from "@/zod-schemas/stationSchema";
+import { stationSchema } from "@/zod-schemas/station-schema";
 import { auth, firestoreDb } from "@/config/firebaseConfig";
 import Station from "@/types/station";
 import { recordLog } from "@/utils/recordLog";
-import { ActionType } from "@/types/activityLog";
+import { ActionType } from "@/types/activity-log";
 import { ZodError } from "zod";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 

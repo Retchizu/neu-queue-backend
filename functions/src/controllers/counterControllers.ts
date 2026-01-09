@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
-import { counterSchema } from "@/zod-schemas/counterSchema";
+import { counterSchema } from "@/zod-schemas/counter-schema";
 import { auth, firestoreDb } from "../config/firebaseConfig";
 import { recordLog } from "../utils/recordLog";
-import { ActionType } from "../types/activityLog";
+import { ActionType } from "../types/activity-log";
 import { ZodError } from "zod";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import Counter from "@/types/counter";
@@ -216,3 +216,66 @@ export const deleteCounter = async (req: Request, res: Response): Promise<void> 
     return;
   }
 };
+
+export const enterCounter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { counterId } = req.params;
+
+    if (!counterId) {
+      res.status(400).json({ message: "Missing counter Id" });
+      return;
+    }
+
+    const counterRef = firestoreDb.collection("counters").doc(counterId);
+    const counterSnapshot = await counterRef.get();
+
+    if (!counterSnapshot.exists) {
+      res.status(404).json({ message: "Counter not found" });
+      return;
+    }
+
+    const counterData = counterSnapshot.data() as Counter;
+
+    // Check if counter is already occupied
+    if (counterData.cashierUid) {
+      res.status(409).json({ message: "Counter is already occupied" });
+      return;
+    }
+
+    // Update counter with cashier UID
+    await counterRef.update({
+      cashierUid: req.user!.uid,
+      updatedAt: FieldValue.serverTimestamp() as Timestamp,
+    });
+
+    const updatedSnapshot = await counterRef.get();
+    const updatedCounter: Counter = {
+      id: counterRef.id,
+      ...updatedSnapshot.data(),
+    } as Counter;
+
+    // Get station info for logging
+    const stationRef = firestoreDb.collection("stations").doc(counterData.stationId);
+    const stationSnapshot = await stationRef.get();
+    const stationName = stationSnapshot.exists ? stationSnapshot.data()!.name : "Unknown";
+
+    const user = await auth.getUser(req.user!.uid);
+    const displayName = user.displayName;
+
+    await recordLog(
+      user.uid,
+      ActionType.EDIT_COUNTER,
+      `${displayName} entered counter ${counterData.number} at station ${stationName}`
+    );
+
+    res.status(200).json({
+      message: `Successfully entered counter ${counterData.number}`,
+      counter: updatedCounter,
+    });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
+

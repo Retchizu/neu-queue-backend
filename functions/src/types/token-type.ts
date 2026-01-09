@@ -1,1 +1,1 @@
-export type TokenType = "form" | "queue";
+export type SessionType = "form" | "queue" | "completed";

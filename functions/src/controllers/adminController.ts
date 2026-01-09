@@ -1,357 +1,703 @@
-import { Response } from "express";
-import AuthRequest from "../types/AuthRequest";
-import { auth, firestoreDb, realtimeDb } from "../config/firebaseConfig";
-import { recordLog } from "../utils/recordLog";
-import { ActionType } from "../types/activityLog";
-import { Blacklist } from "../types/Blacklist";
-import { blockEmailSchema } from "../zod-schemas/blockEmail";
+import { Request, Response } from "express";
+import { auth, firestoreDb } from "@/config/firebaseConfig";
+import { recordLog } from "@/utils/recordLog";
+import { ActionType } from "@/types/activity-log";
+import { Blacklist } from "@/types/blacklist";
+import { blockEmailSchema } from "@/zod-schemas/blockEmail";
+import { assignRoleSchema } from "@/zod-schemas/assign-role-schema";
+import { assignCashierSchema } from "@/zod-schemas/assign-cashier-schema";
 import { ZodError } from "zod";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FirebaseAuthError } from "firebase-admin/auth";
 
-export const getPendingUsers = async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      res.status(401).json({ message: "Unauthorized request" });
-      return;
-    }
-    const userList = await auth.listUsers();
-    console.dir(userList, { depth: null });
-    const pendingUsers = userList.users
-      .filter(
-        (user) =>
-          user.customClaims?.role === "pending" && user.uid !== req.user?.uid
-      )
-      .map((user) => ({
-        uid: user.uid,
-        email: user.email,
-        name: user.displayName,
-        role: user.customClaims?.role,
-        createdAt: user.metadata.creationTime,
-      }));
-    res.status(200).json({ pendingUsers: pendingUsers });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
+export const getPendingUsers = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
 
-export const getEmployees = async (req: AuthRequest, res: Response) => {
-  try {
-    const userList = await auth.listUsers();
-    const allowedRolesToGet =
-      req.user!.role === "superAdmin" ?
-        ["admin", "cashier", "information"] :
-        ["cashier", "information"];
-    const employees = userList.users
-      .filter(
-        (user) =>
-          user.customClaims?.role &&
-          allowedRolesToGet.includes(user.customClaims.role) &&
-          user.uid !== req.user!.uid
-      )
-      .map((user) => ({
-        uid: user.uid,
-        email: user.email,
-        name: user.displayName,
-        role: user.customClaims?.role,
-        createdAt: user.metadata.creationTime,
-      }));
-    console.log(employees);
-    res.status(200).json({ employees: employees });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
+        const userList = await auth.listUsers();
 
-export const assignUserRole = async (req: AuthRequest, res: Response) => {
-  try {
-    const { uid, role }: { uid: string; role: string } = req.body;
+        const pendingUsers = userList.users
+            .filter(
+                (user) =>
+                    user.customClaims?.role === "pending" &&
+                    user.uid !== req.user?.uid
+            )
+            .map((user) => ({
+                id: user.uid,
+                uid: user.uid,
+                email: user.email,
+                name: user.displayName,
+                role: user.customClaims?.role,
+                createdAt: user.metadata.creationTime,
+            }));
 
-    if (!req.user) {
-      res.status(401).json({ message: "Unauthorized request" });
-      return;
-    }
-
-    const validRolesForAdmin = ["cashier", "information"];
-    const validRolesForSuperAdmin = [
-      "admin",
-      "cashier",
-      "information",
-      "superAdmin",
-    ];
-    const requesterRole = req.user.role;
-
-    if (
-      (requesterRole === "admin" && !validRolesForAdmin.includes(role)) ||
-      (requesterRole === "superAdmin" && !validRolesForSuperAdmin.includes(role))
-    ) {
-      res.status(403).json({ message: "Unauthorized to assign this role" });
-      return;
-    }
-    const userRef = realtimeDb.ref(`users/${uid}`);
-    const snapshot = await userRef.get();
-
-    if (!snapshot.exists()) {
-      res.status(404).json({ message: "Invalid user" });
-      return;
-    }
-
-    const existingData = snapshot.val();
-    console.log(existingData.role);
-
-    if (existingData.role === "cashier" && role !== "cashier") {
-      const countersRef = realtimeDb.ref("counters");
-      const countersSnapshot = await countersRef.get();
-
-      const assignedCounters = await Promise.all(
-        countersSnapshot.val() ?
-          Object.entries(
-              countersSnapshot.val() as Record<
-                string,
-                { counterNumber: number; stationID: string; uid: string }
-              >
-          ).map(async ([counterId, counterData]) => {
-            if (counterData.uid === uid) {
-              const stationRef = realtimeDb.ref(`stations/${counterData.stationID}`);
-              const stationSnapshot = await stationRef.get();
-              return {
-                counterId,
-                counterNumber: counterData.counterNumber,
-                stationName: stationSnapshot.exists() ? stationSnapshot.val().name : "Unknown Station",
-              };
-            }
-            return null;
-          }) :
-          []
-      );
-
-      const activeAssignment = assignedCounters.find((counter) => counter !== null);
-
-      if (activeAssignment) {
-        res.status(400).json({
-          // eslint-disable-next-line max-len
-          message: `This cashier is assigned to station '${activeAssignment.stationName}', counter: ${activeAssignment.counterNumber}. Remove them from the station before changing roles.`,
+        res.status(200).json({
+            data: pendingUsers,
         });
         return;
-      }
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
     }
-
-    await auth.setCustomUserClaims(uid, { role: role });
-    await auth.revokeRefreshTokens(uid);
-
-    await userRef.set({
-      role: role,
-      ...(role === "cashier" ? { station: existingData.station ?? null } : {}),
-    });
-
-    const receiver = await auth.getUser(uid);
-    const displayName = receiver.displayName;
-
-    await recordLog(req.user.uid, ActionType.ASSIGN_ROLE, `Changed role of ${displayName} to ${role}`);
-    res.status(200).json({ message: "Role assigned successfully" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: (error as Error).message });
-  }
 };
 
+export const getEmployees = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
 
-export const getUserData = async (req: AuthRequest, res: Response) => {
-  try {
-    const { uid } = req.params;
-    const userRecord = await auth.getUser(uid);
-    res.status(200).json({ userData: userRecord });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
+        const limit = Number(req.query.limit) || 10;
+        const cursor = req.query.cursor as string | undefined;
+
+        // Firebase Auth maxResults can be up to 1000
+        // We fetch a larger batch to account for filtering
+        const maxResults = Math.min(Math.max(limit * 3, 100), 1000);
+
+        const userList = cursor
+            ? await auth.listUsers(maxResults, cursor)
+            : await auth.listUsers(maxResults);
+
+        const allowedRolesToGet =
+            req.user.role === "superAdmin"
+                ? ["admin", "cashier", "information"]
+                : ["cashier", "information"];
+
+        const employees = userList.users
+            .filter(
+                (user) =>
+                    user.customClaims?.role &&
+                    allowedRolesToGet.includes(user.customClaims.role) &&
+                    user.uid !== req.user!.uid
+            )
+            .slice(0, limit)
+            .map((user) => ({
+                id: user.uid,
+                uid: user.uid,
+                email: user.email,
+                name: user.displayName,
+                role: user.customClaims?.role,
+                createdAt: user.metadata.creationTime,
+            }));
+
+        // Determine if there are more pages
+        // If we got fewer results than requested after filtering, we might need to fetch more
+        // For simplicity, we'll use Firebase Auth's pageToken if available
+        const nextCursor =
+            userList.pageToken && employees.length === limit
+                ? userList.pageToken
+                : null;
+
+        res.status(200).json({
+            data: employees,
+            nextCursor,
+        });
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
+};
+
+export const assignUserRole = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const parsedBody = assignRoleSchema.parse(req.body);
+        const { userId, role } = parsedBody;
+
+        const validRolesForAdmin = ["cashier", "information"];
+        const validRolesForSuperAdmin = [
+            "admin",
+            "cashier",
+            "information",
+            "superAdmin",
+        ];
+
+        const requesterRole = req.user.role;
+
+        if (
+            (requesterRole === "admin" && !validRolesForAdmin.includes(role)) ||
+            (requesterRole === "superAdmin" &&
+                !validRolesForSuperAdmin.includes(role))
+        ) {
+            res.status(403).json({
+                message: "Unauthorized to assign this role",
+            });
+            return;
+        }
+
+        try {
+            await auth.getUser(userId);
+        } catch (error) {
+            res.status(404).json({
+                message: "User not found",
+            });
+            return;
+        }
+
+        const userRef = firestoreDb.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+            res.status(404).json({
+                message: "User data not found",
+            });
+            return;
+        }
+
+        const existingData = userDoc.data();
+
+        if (existingData?.role === "cashier" && role !== "cashier") {
+            const countersSnapshot = await firestoreDb
+                .collection("counters")
+                .where("cashierUid", "==", userId)
+                .get();
+
+            const assignedCounters = await Promise.all(
+                countersSnapshot.docs.map(async (counterDoc) => {
+                    const counterData = counterDoc.data();
+                    const stationDoc = await firestoreDb
+                        .collection("stations")
+                        .doc(counterData.stationId)
+                        .get();
+
+                    return {
+                        counterId: counterDoc.id,
+                        counterNumber: counterData.number,
+                        stationName: stationDoc.exists
+                            ? stationDoc.data()?.name
+                            : "Unknown Station",
+                    };
+                })
+            );
+
+            const activeAssignment =
+                assignedCounters.length > 0 ? assignedCounters[0] : null;
+
+            if (activeAssignment) {
+                res.status(409).json({
+                    message:
+                        "This cashier is assigned to station " +
+                        `'${activeAssignment.stationName}', ` +
+                        `counter: ${activeAssignment.counterNumber}. ` +
+                        "Remove them from the station before changing roles.",
+                });
+                return;
+            }
+        }
+
+        await auth.setCustomUserClaims(userId, { role: role });
+        await auth.revokeRefreshTokens(userId);
+
+        const updateData: {
+            role: string;
+            updatedAt: Timestamp;
+            station?: string | null;
+        } = {
+            role: role,
+            updatedAt: FieldValue.serverTimestamp() as Timestamp,
+        };
+
+        if (role === "cashier") {
+            updateData.station = existingData?.station ?? null;
+        } else {
+            updateData.station = null;
+        }
+
+        await userRef.set(updateData, { merge: true });
+
+        const receiver = await auth.getUser(userId);
+        const displayName = receiver.displayName;
+
+        await recordLog(
+            req.user.uid,
+            ActionType.ASSIGN_ROLE,
+            `Changed role of ${displayName} to ${role}`
+        );
+
+        res.status(200).json({
+            data: {
+                userId: userId,
+                role: role,
+                updatedAt: new Date().toISOString(),
+            },
+        });
+        return;
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({
+                message: error.errors.map((err) => err.message).join(", "),
+            });
+            return;
+        } else {
+            console.error(error);
+            res.status(500).json({
+                message: (error as Error).message,
+            });
+            return;
+        }
+    }
+};
+
+export const assignCashier = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const parsedBody = assignCashierSchema.parse(req.body);
+        const { userId, stationId } = parsedBody;
+
+        let userRecord;
+        try {
+            userRecord = await auth.getUser(userId);
+        } catch (error) {
+            res.status(404).json({
+                message: "User not found",
+            });
+            return;
+        }
+
+        if (userRecord.customClaims?.role !== "cashier") {
+            res.status(400).json({
+                message:
+                    "User must have cashier role to be assigned to a station",
+            });
+            return;
+        }
+
+        const stationDoc = await firestoreDb
+            .collection("stations")
+            .doc(stationId)
+            .get();
+
+        if (!stationDoc.exists) {
+            res.status(404).json({
+                message: "Station not found",
+            });
+            return;
+        }
+
+        const userRef = firestoreDb.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+            res.status(404).json({
+                message: "User data not found in database",
+            });
+            return;
+        }
+
+        await userRef.update({
+            station: stationId,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        const stationData = stationDoc.data();
+        const cashierDisplayName = userRecord.displayName;
+
+        await recordLog(
+            req.user.uid,
+            ActionType.ASSIGN_CASHIER,
+            `Assigned cashier ${cashierDisplayName} to station ${stationData?.name}`
+        );
+
+        res.status(200).json({
+            data: {
+                userId: userId,
+                stationId: stationId,
+                updatedAt: new Date().toISOString(),
+            },
+        });
+        return;
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({
+                message: error.errors.map((err) => err.message).join(", "),
+            });
+            return;
+        } else {
+            console.error(error);
+            res.status(500).json({
+                message: (error as Error).message,
+            });
+            return;
+        }
+    }
+};
+
+export const getUserData = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const { userId } = req.params;
+
+        if (!userId) {
+            res.status(400).json({
+                message: "User ID is required",
+            });
+            return;
+        }
+
+        const userRecord = await auth.getUser(userId);
+
+        const userRef = firestoreDb.collection("users").doc(userId);
+        const userDoc = await userRef.get();
+        const userData = userDoc.exists ? userDoc.data() : null;
+
+        res.status(200).json({
+            data: {
+                id: userRecord.uid,
+                uid: userRecord.uid,
+                email: userRecord.email,
+                displayName: userRecord.displayName,
+                role: userRecord.customClaims?.role,
+                assignedStationId: userData?.station || null,
+                assignedCounterId: userData?.counterId || null,
+                createdAt: userRecord.metadata.creationTime,
+                lastSignInTime: userRecord.metadata.lastSignInTime,
+            },
+        });
+        return;
+    } catch (error) {
+        if ((error as FirebaseAuthError).code === "auth/user-not-found") {
+            res.status(404).json({
+                message: "User not found",
+            });
+            return;
+        }
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
 };
 
 export const getAvailableCashierEmployees = async (
-  req: AuthRequest,
-  res: Response
-) => {
-  try {
-    const userList = await auth.listUsers();
-    const cashierEmployees = userList.users.filter(
-      (user) => user.customClaims?.role === "cashier"
-    );
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
 
-    const usersRef = realtimeDb.ref("users");
-    const userSnapshot = await usersRef.get();
+        const userList = await auth.listUsers();
 
-    const usersData = userSnapshot.val() ?? [];
+        const cashierEmployees = userList.users.filter(
+            (user) => user.customClaims?.role === "cashier"
+        );
 
-    const availableCashiers = cashierEmployees.filter((cashier) => {
-      const userData = usersData[cashier.uid];
-      return userData && !userData.counterID;
-    });
+        const usersSnapshot = await firestoreDb.collection("users").get();
+        const usersDataMap = new Map(
+            usersSnapshot.docs.map((doc) => [doc.id, doc.data()])
+        );
 
-    res.status(200).json({ availableCashiers });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
+        const countersSnapshot = await firestoreDb
+            .collection("counters")
+            .where("cashierUid", "!=", null)
+            .get();
 
-export const getActivityLogs = async (req: AuthRequest, res: Response) => {
-  try {
-    const { startDate, endDate } = req.query; // Extract query params
+        const assignedCashierIds = new Set(
+            countersSnapshot.docs
+                .map((doc) => doc.data().cashierUid)
+                .filter((uid) => uid !== null)
+        );
 
-    if (!startDate || !endDate) {
-      res.status(400).json({ message: "Missing startDate or endDate" });
-      return;
-    }
+        const availableCashiers = cashierEmployees
+            .filter((cashier) => {
+                const userData = usersDataMap.get(cashier.uid);
+                return userData && !assignedCashierIds.has(cashier.uid);
+            })
+            .map((cashier) => {
+                const userData = usersDataMap.get(cashier.uid);
+                return {
+                    id: cashier.uid,
+                    uid: cashier.uid,
+                    email: cashier.email,
+                    name: cashier.displayName,
+                    role: cashier.customClaims?.role,
+                    stationId: userData?.station || null,
+                    createdAt: cashier.metadata.creationTime,
+                };
+            });
 
-    // Convert to timestamps for Firestore
-    const startTimestamp = new Date(startDate as string).getTime();
-    const endTimestamp = new Date(endDate as string).getTime();
-
-    const activityRef = firestoreDb
-      .collection("activity-log")
-      .where("timestamp", ">=", startTimestamp)
-      .where("timestamp", "<=", endTimestamp)
-      .orderBy("timestamp");
-
-    const activitiesSnapshot = await activityRef.get();
-
-    const activityLogs = activitiesSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    res.status(200).json({ activities: activityLogs });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-export const blockCustomerEmail = async (req: AuthRequest, res: Response) => {
-  try {
-    const parsedBody = blockEmailSchema.parse(req.body);
-    const {email, reason} = parsedBody;
-
-    const blacklistRef = realtimeDb.ref("blacklist").push();
-    const snapshot = await realtimeDb.ref("blacklist").orderByChild("email").equalTo(email).get();
-    if (snapshot.exists()) {
-      res.status(400).json({ message: "Email is already blacklisted." });
-    }
-    await blacklistRef.set({
-      email,
-      reason,
-    });
-    if (!req.user) {
-      res.status(401).json({message: "User ID is missing!"});
-      return;
-    }
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
-    await recordLog(req.user.uid, ActionType.BLOCK_EMAIL, `${displayName} blocks ${email} for ${reason}`);
-    res.status(200).json({ message: "Email successfully blacklisted." });
-  } catch (error) {
-    if (error instanceof ZodError) {
-      res.status(400).json({ message: error.errors.map((err) => err.message).join(", ") });
-    } else {
-      res.status(500).json({ message: (error as Error).message });
-    }
-  }
-};
-
-export const getBlacklistedEmails = async (req: AuthRequest, res: Response) => {
-  try {
-    const blacklistRef = realtimeDb.ref("blacklist");
-    const snapshot = await blacklistRef.get();
-
-    if (!snapshot.exists()) {
-      res.status(200).json({ message: "No blacklisted emails found.", blacklist: [] });
-      return;
-    }
-
-    const blacklistedEmails: Blacklist[] = Object.values(snapshot.val());
-
-    res.status(200).json({ blacklist: blacklistedEmails });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-
-export const removeBlacklistedEmail = async (req: AuthRequest, res: Response) => {
-  try {
-    const { email } = req.params;
-
-    if (!email) {
-      res.status(400).json({ message: "Email is required" });
-      return;
-    }
-
-    const blacklistRef = realtimeDb.ref("blacklist");
-    const blacklistedEmail = await blacklistRef.orderByChild("email").equalTo(email).get();
-
-
-    if (!blacklistedEmail.exists()) {
-      res.status(404).json({ message: "Email not found in blacklist" });
-      return;
-    }
-
-    const emailKey = Object.keys(blacklistedEmail.val())[0];
-    await blacklistRef.child(emailKey).remove();
-
-    if (!req.user) {
-      res.status(401).json({ message: "User ID is missing!" });
-      return;
-    }
-
-    const receiver = await auth.getUser(req.user.uid);
-    const displayName = receiver.displayName;
-    await recordLog(req.user.uid, ActionType.BLOCK_EMAIL, `${displayName} unblocks ${email}`);
-
-    res.status(200).json({ message: "Email removed from blacklist." });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-};
-
-
-export const getAnalytics = async (req: AuthRequest, res: Response) => {
-  try {
-    const { startDate, endDate } = req.query;
-
-    if (!startDate || !endDate) {
-      res.status(400).json({ message: "Missing startDate or endDate in query." });
-      return;
-    }
-
-    const start = new Date(startDate as string).getTime();
-    const end = new Date(endDate as string).getTime();
-
-    const historySnapshot = await firestoreDb.collection("queue-history").listDocuments();
-
-    const analytics: Record <string, {total:number, successful: number, unsuccessful: number}> = {};
-    for (const docRef of historySnapshot) {
-      const docId = docRef.id;
-      console.log(docRef.id);
-      const docDate = new Date(docId).getTime();
-      if (docDate >= start && docDate <= end) {
-        const entriesSnapshot = await docRef.collection("entries").get();
-        entriesSnapshot.forEach((entryDoc) => {
-          const data = entryDoc.data();
-          const {stationID} = data;
-          if (!analytics[stationID]) {
-            analytics[stationID] = { total: 0, successful: 0, unsuccessful: 0 };
-          }
-
-          analytics[stationID].total++;
-          if (data.customerStatus === "complete") {
-            analytics[stationID].successful++;
-          } else {
-            analytics[stationID].unsuccessful++;
-          }
+        res.status(200).json({
+            data: availableCashiers,
         });
-      }
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
     }
+};
 
-    res.status(200).json({
-      analytics,
-    });
-  } catch (error) {
-    console.error("Analytics Error:", error);
-    res.status(500).json({ message: (error as Error).message });
-  }
+export const getActivityLogs = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const { startDate, endDate } = req.query;
+
+        if (!startDate || !endDate) {
+            res.status(400).json({
+                message: "Missing startDate or endDate query parameters",
+            });
+            return;
+        }
+
+        const startTimestamp = new Date(startDate as string).getTime();
+        const endTimestamp = new Date(endDate as string).getTime();
+
+        if (isNaN(startTimestamp) || isNaN(endTimestamp)) {
+            res.status(400).json({
+                message: "Invalid date format. Use ISO date strings.",
+            });
+            return;
+        }
+
+        const activityRef = firestoreDb
+            .collection("activity-log")
+            .where("timestamp", ">=", startTimestamp)
+            .where("timestamp", "<=", endTimestamp)
+            .orderBy("timestamp", "desc");
+
+        const activitiesSnapshot = await activityRef.get();
+
+        const activityLogs = activitiesSnapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+
+        res.status(200).json({
+            data: activityLogs,
+        });
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
+};
+
+export const blockCustomerEmail = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const parsedBody = blockEmailSchema.parse(req.body);
+        const { email, reason } = parsedBody;
+
+        const blacklistSnapshot = await firestoreDb
+            .collection("blacklist")
+            .where("email", "==", email.toLowerCase())
+            .get();
+
+        if (!blacklistSnapshot.empty) {
+            res.status(409).json({
+                message: "Email is already blacklisted.",
+            });
+            return;
+        }
+
+        await firestoreDb.collection("blacklist").add({
+            email: email.toLowerCase(),
+            reason,
+            blockedAt: FieldValue.serverTimestamp(),
+            blockedBy: req.user.uid,
+        });
+
+        const adminUser = await auth.getUser(req.user.uid);
+        const displayName = adminUser.displayName;
+
+        await recordLog(
+            req.user.uid,
+            ActionType.BLOCK_EMAIL,
+            `${displayName} blocks ${email} for ${reason}`
+        );
+
+        res.status(200).json({
+            message: "Email successfully blacklisted.",
+        });
+        return;
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({
+                message: error.errors.map((err) => err.message).join(", "),
+            });
+            return;
+        } else {
+            res.status(500).json({
+                message: (error as Error).message,
+            });
+            return;
+        }
+    }
+};
+
+export const getBlacklistedEmails = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const blacklistSnapshot = await firestoreDb
+            .collection("blacklist")
+            .orderBy("blockedAt", "desc")
+            .get();
+
+        if (blacklistSnapshot.empty) {
+            res.status(200).json({
+                data: [],
+            });
+            return;
+        }
+
+        const blacklistedEmails: Blacklist[] = blacklistSnapshot.docs.map(
+            (doc) => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    email: data.email,
+                    reason: data.reason,
+                    blockedAt: data.blockedAt,
+                    blockedBy: data.blockedBy,
+                };
+            }
+        );
+
+        res.status(200).json({
+            data: blacklistedEmails,
+        });
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
+};
+
+export const removeBlacklistedEmail = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const { email } = req.params;
+
+        if (!email) {
+            res.status(400).json({
+                message: "Email is required",
+            });
+            return;
+        }
+
+        const blacklistedEmailSnapshot = await firestoreDb
+            .collection("blacklist")
+            .where("email", "==", email.toLowerCase())
+            .get();
+
+        if (blacklistedEmailSnapshot.empty) {
+            res.status(404).json({
+                message: "Email not found in blacklist",
+            });
+            return;
+        }
+
+        const blacklistDoc = blacklistedEmailSnapshot.docs[0];
+        await blacklistDoc.ref.delete();
+
+        const adminUser = await auth.getUser(req.user.uid);
+        const displayName = adminUser.displayName;
+
+        await recordLog(
+            req.user.uid,
+            ActionType.UNBLOCK_EMAIL,
+            `${displayName} unblocks ${email}`
+        );
+
+        res.status(200).json({
+            message: "Email removed from blacklist.",
+        });
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
 };

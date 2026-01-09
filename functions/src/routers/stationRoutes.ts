@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { verifyRole } from "../middlewares/verifyRole";
 import {
-  addStation,
-  deleteStation,
-  getStation,
-  getStations,
-  updateStation,
+    addStation,
+    deleteStation,
+    getStation,
+    getStations,
+    updateStation,
 } from "@/controllers/stationControllers";
 import { checkStationActivation } from "../middlewares/checkStationActivation";
 import { verifyAuthTokenAndDomain } from "@/middlewares/verifyAuthTokenAndDomain";
