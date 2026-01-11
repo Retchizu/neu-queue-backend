@@ -14,10 +14,10 @@ const router: Router = Router();
 
 router.use(verifyAuthTokenAndDomain, verifyRole(["admin", "superAdmin"]));
 
-router.post("/stations", addStation);
-router.get("/stations", getStations);
-router.get("/stations/:stationId", getStation);
-router.delete("/delete/:stationId", deleteStation);
-router.put("/stations/:stationId", updateStation);
+router.post("/", addStation);
+router.get("/", getStations);
+router.get("/:stationId", getStation);
+router.delete("/:stationId", deleteStation);
+router.put("/:stationId", updateStation);
 
 export default router;

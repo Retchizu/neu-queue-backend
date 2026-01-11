@@ -15,12 +15,12 @@ const router: Router = Router();
 
 router.use(verifyAuthTokenAndDomain);
 
-router.post("/counters", verifyRole(["admin", "superAdmin"]), addCounter);
-router.get("/counters", verifyRole(["admin", "superAdmin"]), getCounters);
-router.delete("/counters/:counterId", verifyRole(["admin", "superAdmin"]), deleteCounter);
-router.put("/counters/:counterId", verifyRole(["admin", "superAdmin"]), updateCounter);
-router.post("/counters/:counterId/enter", verifyRole(["cashier"]), enterCounter);
-router.post("/counters/:counterId/exit", verifyRole(["cashier"]), exitCounter);
+router.post("/", verifyRole(["admin", "superAdmin"]), addCounter);
+router.get("/", verifyRole(["admin", "superAdmin"]), getCounters);
+router.delete("/:counterId", verifyRole(["admin", "superAdmin"]), deleteCounter);
+router.put("/:counterId", verifyRole(["admin", "superAdmin"]), updateCounter);
+router.post("/:counterId/enter", verifyRole(["cashier"]), enterCounter);
+router.post("/:counterId/exit", verifyRole(["cashier"]), exitCounter);
 
 
 export default router;
