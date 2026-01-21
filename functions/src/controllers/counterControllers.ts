@@ -20,6 +20,18 @@ export const addCounter = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    // Check if counter with same number already exists for this station
+    const existingCounterSnapshot = await firestoreDb
+      .collection("counters")
+      .where("stationId", "==", stationId)
+      .where("number", "==", number)
+      .get();
+
+    if (!existingCounterSnapshot.empty) {
+      res.status(409).json({ message: "Counter with this number already exists in this station."});
+      return;
+    }
+
     const counterRef = firestoreDb.collection("counters").doc();
     const counter: Counter = {
       number: number,
@@ -82,6 +94,72 @@ export const getCounters = async (req: Request, res: Response): Promise<void> =>
     const snapshotLength = counterSnapshot.docs.length;
     const nextCursor = snapshotLength > 0 ? counterSnapshot.docs[snapshotLength - 1].id : null;
     res.status(200).json({ counters, nextCursor });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
+
+export const getCountersByStation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { stationId } = req.params;
+    const { limit: limitParam, cursor } = req.query;
+
+    if (!stationId) {
+      res.status(400).json({ message: "stationId is required" });
+      return;
+    }
+
+    const limit = Number(limitParam) || 10;
+    const cursorString = cursor as string;
+
+    // Verify station exists
+    const stationDoc = await firestoreDb
+      .collection("stations")
+      .doc(stationId)
+      .get();
+
+    if (!stationDoc.exists) {
+      res.status(404).json({ message: "Station not found" });
+      return;
+    }
+
+    // Build query for counters for the station
+    let counterQuery = firestoreDb
+      .collection("counters")
+      .where("stationId", "==", stationId)
+      .orderBy("number", "asc")
+      .limit(limit);
+
+    // If cursor is provided, start after that document
+    if (cursorString) {
+      const lastDoc = await firestoreDb
+        .collection("counters")
+        .doc(cursorString)
+        .get();
+      if (lastDoc.exists) {
+        counterQuery = counterQuery.startAfter(lastDoc);
+      }
+    }
+
+    const counterSnapshot = await counterQuery.get();
+
+    // Map counter documents to Counter type
+    const counters: Counter[] = counterSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }) as Counter);
+
+    const nextCursor =
+      counterSnapshot.docs.length > 0
+        ? counterSnapshot.docs[counterSnapshot.docs.length - 1].id
+        : null;
+
+    res.status(200).json({
+      counters,
+      nextCursor,
+    });
     return;
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
@@ -176,12 +254,7 @@ export const updateCounter = async (req: Request, res: Response): Promise<void> 
 export const deleteCounter = async (req: Request, res: Response): Promise<void> => {
   try {
     const { counterId } = req.params;
-    const {stationId, cashierUid} = counterSchema.parse(req.body);
-
-    if (cashierUid) {
-      res.status(409).json({ message: "Can not delete an active counter."});
-      return;
-    }
+    const { stationId } = req.query;
 
     if (!counterId) {
       res.status(400).json({ message: "Missing counter Id" });
@@ -195,9 +268,17 @@ export const deleteCounter = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    const counterData = counterSnapshot.data() as Counter;
+    const counterStationId = (stationId as string) || counterData.stationId;
+
+    if (counterData.cashierUid) {
+      res.status(409).json({ message: "Can not delete an active counter."});
+      return;
+    }
+
     await counterRef.delete();
 
-    const stationRef = firestoreDb.collection("stations").doc(stationId);
+    const stationRef = firestoreDb.collection("stations").doc(counterStationId);
     const stationSnapshot = await stationRef.get();
 
     const user = await auth.getUser(req.user!.uid);
