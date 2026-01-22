@@ -264,3 +264,34 @@ export const deleteStation = async (
     return;
   }
 };
+
+export const getAssignedStation = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized request" });
+      return;
+    }
+
+    const cashierRef = firestoreDb.collection("cashiers").doc(req.user.uid);
+    const cashierDoc = await cashierRef.get();
+
+    if (!cashierDoc.exists) {
+      res.status(404).json({ message: "Cashier not found" });
+      return;
+    }
+
+    const cashierData = cashierDoc.data();
+    const stationId = cashierData?.stationId || cashierData?.station || "";
+
+    res.status(200).json({
+      stationId: stationId || "",
+    });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};

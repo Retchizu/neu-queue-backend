@@ -4,6 +4,7 @@ import { verifyRole } from "@/middlewares/verifyRole";
 import {
   assignUserRole,
   assignCashier,
+  unassignCashier,
   blockCustomerEmail,
   getActivityLogs,
   getAvailableCashierEmployees,
@@ -23,6 +24,7 @@ router.get("/pending-users", getPendingUsers);
 router.get("/employees", getEmployees);
 router.post("/assign-role", assignUserRole);
 router.post("/assign-cashier", assignCashier);
+router.post("/unassign-cashier", unassignCashier);
 router.get("/users/:userId", getUserData);
 router.get("/available-cashiers", getAvailableCashierEmployees);
 

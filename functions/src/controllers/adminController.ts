@@ -164,41 +164,28 @@ export const assignUserRole = async (
             return;
         }
 
-        const existingRole = existingUser.customClaims?.role;
+        // Check if user exists in cashiers collection
+        const cashierRef = firestoreDb.collection("cashiers").doc(userId);
+        const cashierDoc = await cashierRef.get();
 
-        if (existingRole === "cashier" && role !== "cashier") {
-            const countersSnapshot = await firestoreDb
-                .collection("counters")
-                .where("cashierUid", "==", userId)
-                .get();
+        if (cashierDoc.exists && role !== "cashier") {
+            const cashierData = cashierDoc.data();
+            const stationId = cashierData?.stationId || cashierData?.station;
 
-            const assignedCounters = await Promise.all(
-                countersSnapshot.docs.map(async (counterDoc) => {
-                    const counterData = counterDoc.data();
-                    const stationDoc = await firestoreDb
-                        .collection("stations")
-                        .doc(counterData.stationId)
-                        .get();
+            if (stationId) {
+                const stationDoc = await firestoreDb
+                    .collection("stations")
+                    .doc(stationId)
+                    .get();
 
-                    return {
-                        counterId: counterDoc.id,
-                        counterNumber: counterData.number,
-                        stationName: stationDoc.exists
-                            ? stationDoc.data()?.name
-                            : "Unknown Station",
-                    };
-                })
-            );
+                const stationName = stationDoc.exists
+                    ? stationDoc.data()?.name
+                    : "Unknown Station";
 
-            const activeAssignment =
-                assignedCounters.length > 0 ? assignedCounters[0] : null;
-
-            if (activeAssignment) {
                 res.status(409).json({
                     message:
                         "This cashier is assigned to station " +
-                        `'${activeAssignment.stationName}', ` +
-                        `counter: ${activeAssignment.counterNumber}. ` +
+                        `'${stationName}'. ` +
                         "Remove them from the station before changing roles.",
                 });
                 return;
@@ -207,6 +194,19 @@ export const assignUserRole = async (
 
         await auth.setCustomUserClaims(userId, { role: role });
         await auth.revokeRefreshTokens(userId);
+
+        // Create cashier document if role is being changed to "cashier"
+        if (role === "cashier") {
+            const cashierRef = firestoreDb.collection("cashiers").doc(userId);
+            const cashierDoc = await cashierRef.get();
+
+            if (!cashierDoc.exists) {
+                await cashierRef.set({
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+            }
+        }
 
         const receiver = existingUser;
         const displayName = receiver.displayName;
@@ -286,12 +286,12 @@ export const assignCashier = async (
             return;
         }
 
-        const userRef = firestoreDb.collection("users").doc(userId);
+        const userRef = firestoreDb.collection("cashiers").doc(userId);
         const userDoc = await userRef.get();
 
         if (!userDoc.exists) {
             res.status(404).json({
-                message: "User data not found in database",
+                message: "Cashier not found in database",
             });
             return;
         }
@@ -334,6 +334,102 @@ export const assignCashier = async (
     }
 };
 
+export const unassignCashier = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const { userId } = req.body;
+
+        if (!userId) {
+            res.status(400).json({
+                message: "User ID is required",
+            });
+            return;
+        }
+
+        let userRecord;
+        try {
+            userRecord = await auth.getUser(userId);
+        } catch (error) {
+            res.status(404).json({
+                message: "User not found",
+            });
+            return;
+        }
+
+        if (userRecord.customClaims?.role !== "cashier") {
+            res.status(400).json({
+                message: "User must have cashier role to be unassigned",
+            });
+            return;
+        }
+
+        const userRef = firestoreDb.collection("cashiers").doc(userId);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+            res.status(404).json({
+                message: "Cashier not found in database",
+            });
+            return;
+        }
+
+        const cashierData = userDoc.data();
+        const stationId = cashierData?.stationId || cashierData?.station;
+
+        if (!stationId) {
+            res.status(400).json({
+                message: "Cashier is not assigned to any station",
+            });
+            return;
+        }
+
+        // Get station name for logging
+        const stationDoc = await firestoreDb
+            .collection("stations")
+            .doc(stationId)
+            .get();
+        const stationName = stationDoc.exists
+            ? stationDoc.data()?.name
+            : "Unknown Station";
+
+        // Remove station field
+        await userRef.update({
+            stationId: null,
+            updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        const cashierDisplayName = userRecord.displayName;
+
+        await recordLog(
+            req.user.uid,
+            ActionType.UNASSIGN_CASHIER,
+            `Unassigned cashier ${cashierDisplayName} from station ${stationName}`
+        );
+
+        res.status(200).json({
+            data: {
+                userId: userId,
+            },
+        });
+        return;
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
+};
+
 export const getUserData = async (
     req: Request,
     res: Response
@@ -357,7 +453,7 @@ export const getUserData = async (
 
         const userRecord = await auth.getUser(userId);
 
-        const userRef = firestoreDb.collection("users").doc(userId);
+        const userRef = firestoreDb.collection("cashiers").doc(userId);
         const userDoc = await userRef.get();
         const userData = userDoc.exists ? userDoc.data() : null;
 
@@ -407,26 +503,15 @@ export const getAvailableCashierEmployees = async (
             (user) => user.customClaims?.role === "cashier"
         );
 
-        const usersSnapshot = await firestoreDb.collection("users").get();
+        const usersSnapshot = await firestoreDb.collection("cashiers").get();
         const usersDataMap = new Map(
             usersSnapshot.docs.map((doc) => [doc.id, doc.data()])
-        );
-
-        const countersSnapshot = await firestoreDb
-            .collection("counters")
-            .where("cashierUid", "!=", null)
-            .get();
-
-        const assignedCashierIds = new Set(
-            countersSnapshot.docs
-                .map((doc) => doc.data().cashierUid)
-                .filter((uid) => uid !== null)
         );
 
         const availableCashiers = cashierEmployees
             .filter((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
-                return userData && !assignedCashierIds.has(cashier.uid);
+                return userData && !userData.station;
             })
             .map((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
