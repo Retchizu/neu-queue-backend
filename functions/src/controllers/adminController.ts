@@ -7,7 +7,7 @@ import { blockEmailSchema } from "@/zod-schemas/blockEmail";
 import { assignRoleSchema } from "@/zod-schemas/assign-role-schema";
 import { assignCashierSchema } from "@/zod-schemas/assign-cashier-schema";
 import { ZodError } from "zod";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { FirebaseAuthError } from "firebase-admin/auth";
 
 export const getPendingUsers = async (
@@ -40,7 +40,7 @@ export const getPendingUsers = async (
             }));
 
         res.status(200).json({
-            data: pendingUsers,
+            pendingUsers,
         });
         return;
     } catch (error) {
@@ -105,7 +105,7 @@ export const getEmployees = async (
                 : null;
 
         res.status(200).json({
-            data: employees,
+            employees,
             nextCursor,
         });
         return;
@@ -132,12 +132,13 @@ export const assignUserRole = async (
         const parsedBody = assignRoleSchema.parse(req.body);
         const { userId, role } = parsedBody;
 
-        const validRolesForAdmin = ["cashier", "information"];
+        const validRolesForAdmin = ["cashier", "information", "pending"];
         const validRolesForSuperAdmin = [
             "admin",
             "cashier",
             "information",
             "superAdmin",
+            "pending",
         ];
 
         const requesterRole = req.user.role;
@@ -153,8 +154,9 @@ export const assignUserRole = async (
             return;
         }
 
+        let existingUser;
         try {
-            await auth.getUser(userId);
+            existingUser = await auth.getUser(userId);
         } catch (error) {
             res.status(404).json({
                 message: "User not found",
@@ -162,19 +164,9 @@ export const assignUserRole = async (
             return;
         }
 
-        const userRef = firestoreDb.collection("users").doc(userId);
-        const userDoc = await userRef.get();
+        const existingRole = existingUser.customClaims?.role;
 
-        if (!userDoc.exists) {
-            res.status(404).json({
-                message: "User data not found",
-            });
-            return;
-        }
-
-        const existingData = userDoc.data();
-
-        if (existingData?.role === "cashier" && role !== "cashier") {
+        if (existingRole === "cashier" && role !== "cashier") {
             const countersSnapshot = await firestoreDb
                 .collection("counters")
                 .where("cashierUid", "==", userId)
@@ -216,24 +208,7 @@ export const assignUserRole = async (
         await auth.setCustomUserClaims(userId, { role: role });
         await auth.revokeRefreshTokens(userId);
 
-        const updateData: {
-            role: string;
-            updatedAt: Timestamp;
-            station?: string | null;
-        } = {
-            role: role,
-            updatedAt: FieldValue.serverTimestamp() as Timestamp,
-        };
-
-        if (role === "cashier") {
-            updateData.station = existingData?.station ?? null;
-        } else {
-            updateData.station = null;
-        }
-
-        await userRef.set(updateData, { merge: true });
-
-        const receiver = await auth.getUser(userId);
+        const receiver = existingUser;
         const displayName = receiver.displayName;
 
         await recordLog(
@@ -634,7 +609,7 @@ export const getBlacklistedEmails = async (
         );
 
         res.status(200).json({
-            data: blacklistedEmails,
+            blacklistedEmails,
         });
         return;
     } catch (error) {

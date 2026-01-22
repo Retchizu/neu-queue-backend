@@ -23,7 +23,16 @@ export const verifyAuthTokenAndDomain = async (req: Request, res: Response, next
       res.status(403).json({ message: "Unauthorized email domain. Contact admin for more info." });
       return;
     }
-    req.user = {...decodedToken, role: decodedToken.role};
+
+    // If email ends with @neu.edu.ph but no role is set, set it to pending
+    if (!decodedToken.role) {
+      await auth.setCustomUserClaims(decodedToken.uid, { role: "pending" });
+      // Set role to pending for current request
+      req.user = {...decodedToken, role: "pending"};
+    } else {
+      req.user = {...decodedToken, role: decodedToken.role};
+    }
+
     next();
     return;
   } catch (error) {
