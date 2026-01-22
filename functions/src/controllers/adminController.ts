@@ -362,7 +362,7 @@ export const getUserData = async (
         const userData = userDoc.exists ? userDoc.data() : null;
 
         res.status(200).json({
-            data: {
+            user: {
                 id: userRecord.uid,
                 uid: userRecord.uid,
                 email: userRecord.email,
@@ -498,7 +498,7 @@ export const getActivityLogs = async (
         }));
 
         res.status(200).json({
-            data: activityLogs,
+            activityLogs,
         });
         return;
     } catch (error) {
@@ -590,7 +590,7 @@ export const getBlacklistedEmails = async (
 
         if (blacklistSnapshot.empty) {
             res.status(200).json({
-                data: [],
+                blacklistedEmails: [],
             });
             return;
         }
