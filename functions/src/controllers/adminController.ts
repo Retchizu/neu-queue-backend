@@ -168,6 +168,9 @@ export const assignUserRole = async (
         const cashierRef = firestoreDb.collection("cashiers").doc(userId);
         const cashierDoc = await cashierRef.get();
 
+        // Get the current role of the target user
+        const currentUserRole = existingUser.customClaims?.role;
+
         if (cashierDoc.exists && role !== "cashier") {
             const cashierData = cashierDoc.data();
             const stationId = cashierData?.stationId || cashierData?.station;
@@ -192,20 +195,25 @@ export const assignUserRole = async (
             }
         }
 
+        // Remove from cashiers collection if the user's current role is cashier and changing to a different role
+        if (currentUserRole === "cashier" && role !== "cashier") {
+            if (cashierDoc.exists) {
+                await cashierRef.delete();
+            }
+        }
+
         await auth.setCustomUserClaims(userId, { role: role });
         await auth.revokeRefreshTokens(userId);
 
         // Create cashier document if role is being changed to "cashier"
-        if (role === "cashier") {
-            const cashierRef = firestoreDb.collection("cashiers").doc(userId);
-            const cashierDoc = await cashierRef.get();
-
-            if (!cashierDoc.exists) {
-                await cashierRef.set({
-                    createdAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp(),
-                });
-            }
+        if (role === "cashier" && !cashierDoc.exists) {
+            await cashierRef.set({
+                uid: existingUser.uid,
+                email: existingUser.email,
+                displayName: existingUser.displayName,
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+            });
         }
 
         const receiver = existingUser;
@@ -528,6 +536,85 @@ export const getAvailableCashierEmployees = async (
 
         res.status(200).json({
             data: availableCashiers,
+        });
+        return;
+    } catch (error) {
+        res.status(500).json({
+            message: (error as Error).message,
+        });
+        return;
+    }
+};
+
+export const getCashiersByStation = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        if (!req.user) {
+            res.status(401).json({
+                message: "Unauthorized request",
+            });
+            return;
+        }
+
+        const { stationId } = req.params;
+
+        if (!stationId) {
+            res.status(400).json({
+                message: "Station ID is required",
+            });
+            return;
+        }
+
+        // Verify station exists
+        const stationDoc = await firestoreDb
+            .collection("stations")
+            .doc(stationId)
+            .get();
+
+        if (!stationDoc.exists) {
+            res.status(404).json({
+                message: "Station not found",
+            });
+            return;
+        }
+
+        // Query cashiers assigned to this station
+        const cashiersSnapshot = await firestoreDb
+            .collection("cashiers")
+            .where("station", "==", stationId)
+            .get();
+
+        // Get full user details from Firebase Auth for each cashier
+        const cashierPromises = cashiersSnapshot.docs.map(async (doc) => {
+            try {
+                const cashierData = doc.data();
+                const userRecord = await auth.getUser(doc.id);
+
+                return {
+                    id: doc.id,
+                    uid: doc.id,
+                    email: userRecord.email,
+                    name: userRecord.displayName,
+                    role: userRecord.customClaims?.role,
+                    stationId: cashierData.station || null,
+                    counterId: cashierData.counterId || null,
+                    createdAt: userRecord.metadata.creationTime,
+                    lastSignInTime: userRecord.metadata.lastSignInTime,
+                };
+            } catch (error) {
+                console.error(`Error fetching user ${doc.id}:`, error);
+                return null;
+            }
+        });
+
+        const cashiers = (await Promise.all(cashierPromises)).filter(
+            (cashier) => cashier !== null
+        );
+
+        res.status(200).json({
+            cashiers,
         });
         return;
     } catch (error) {

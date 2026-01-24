@@ -9,6 +9,7 @@ import {
   getActivityLogs,
   getAvailableCashierEmployees,
   getBlacklistedEmails,
+  getCashiersByStation,
   getEmployees,
   getPendingUsers,
   getUserData,
@@ -27,6 +28,7 @@ router.post("/assign-cashier", assignCashier);
 router.post("/unassign-cashier", unassignCashier);
 router.get("/users/:userId", getUserData);
 router.get("/available-cashiers", getAvailableCashierEmployees);
+router.get("/stations/:stationId/cashiers", getCashiersByStation);
 
 // Activity routes
 router.get("/activity-logs", getActivityLogs);
