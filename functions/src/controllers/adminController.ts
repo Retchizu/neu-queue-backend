@@ -519,7 +519,7 @@ export const getAvailableCashierEmployees = async (
         const availableCashiers = cashierEmployees
             .filter((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
-                return userData && !userData.station;
+                return userData && userData.stationId === null;
             })
             .map((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
@@ -529,13 +529,13 @@ export const getAvailableCashierEmployees = async (
                     email: cashier.email,
                     name: cashier.displayName,
                     role: cashier.customClaims?.role,
-                    stationId: userData?.station || null,
+                    stationId: userData?.stationId || null,
                     createdAt: cashier.metadata.creationTime,
                 };
             });
 
         res.status(200).json({
-            data: availableCashiers,
+            availableCashiers,
         });
         return;
     } catch (error) {
@@ -583,7 +583,7 @@ export const getCashiersByStation = async (
         // Query cashiers assigned to this station
         const cashiersSnapshot = await firestoreDb
             .collection("cashiers")
-            .where("station", "==", stationId)
+            .where("stationId", "==", stationId)
             .get();
 
         // Get full user details from Firebase Auth for each cashier
@@ -598,7 +598,7 @@ export const getCashiersByStation = async (
                     email: userRecord.email,
                     name: userRecord.displayName,
                     role: userRecord.customClaims?.role,
-                    stationId: cashierData.station || null,
+                    stationId: cashierData.stationId || null,
                     counterId: cashierData.counterId || null,
                     createdAt: userRecord.metadata.creationTime,
                     lastSignInTime: userRecord.metadata.lastSignInTime,
