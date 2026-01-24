@@ -305,7 +305,7 @@ export const assignCashier = async (
         }
 
         await userRef.update({
-            station: stationId,
+            stationId: stationId,
             updatedAt: FieldValue.serverTimestamp(),
         });
 
