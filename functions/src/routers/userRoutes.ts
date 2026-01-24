@@ -6,7 +6,7 @@ import { verifyRole } from "@/middlewares/verifyRole";
 // eslint-disable-next-line new-cap
 const router: Router = Router();
 
-router.get("/admin/me", verifyAuthTokenAndDomain, verifyRole(["admin"]), getCurrentAuthDetails);
+router.get("/admin/me", verifyAuthTokenAndDomain, verifyRole(["superAdmin", "admin"]), getCurrentAuthDetails);
 router.get("/cashier/me", verifyAuthTokenAndDomain, verifyRole(["cashier"]), getCurrentAuthDetails);
 
 
