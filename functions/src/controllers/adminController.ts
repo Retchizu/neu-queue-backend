@@ -211,6 +211,7 @@ export const assignUserRole = async (
                 uid: existingUser.uid,
                 email: existingUser.email,
                 displayName: existingUser.displayName,
+                stationId: null,
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
             });
@@ -519,7 +520,7 @@ export const getAvailableCashierEmployees = async (
         const availableCashiers = cashierEmployees
             .filter((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
-                return userData && userData.stationId === null;
+                return userData && (userData.stationId === null || userData.stationId === undefined);
             })
             .map((cashier) => {
                 const userData = usersDataMap.get(cashier.uid);
