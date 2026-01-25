@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
-import { getCurrentAuthDetails } from "../controllers/userController";
+import { getAdminAuthDetails, getCashierAuthDetails } from "../controllers/userController";
 import { verifyRole } from "@/middlewares/verifyRole";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();
 
-router.get("/admin/me", verifyAuthTokenAndDomain, verifyRole(["superAdmin", "admin"]), getCurrentAuthDetails);
-router.get("/cashier/me", verifyAuthTokenAndDomain, verifyRole(["cashier"]), getCurrentAuthDetails);
+router.get("/admin/me", verifyAuthTokenAndDomain, verifyRole(["superAdmin", "admin"]), getAdminAuthDetails);
+router.get("/cashier/me", verifyAuthTokenAndDomain, verifyRole(["cashier"]), getCashierAuthDetails);
 
 
 export default router;
