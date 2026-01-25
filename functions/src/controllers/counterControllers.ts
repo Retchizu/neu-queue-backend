@@ -391,22 +391,18 @@ export const exitCounter = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Check if there are other active counters in the same station
-    const activeCountersSnapshot = await firestoreDb
-      .collection("counters")
+    // Prevent exit if there are still customers queued (waiting or serving) in this station
+    const queuedInStationSnapshot = await firestoreDb
+      .collection("queue")
       .where("stationId", "==", counterData.stationId)
-      .where("cashierUid", "!=", null)
+      .where("status", "in", ["waiting", "serving"])
+      .limit(1)
       .get();
 
-    // Filter out the current counter from the active counters
-    const otherActiveCounters = activeCountersSnapshot.docs.filter(
-      (doc) => doc.id !== counterId && doc.data().cashierUid !== null
-    );
-
-    // Prevent exit if there are no other active counters in the station
-    if (otherActiveCounters.length === 0) {
+    if (!queuedInStationSnapshot.empty) {
       res.status(409).json({
-        message: "Cannot exit counter. There are no other active counters serving in this station.",
+        message:
+          "Cannot exit counter. There are still customers queued in this station.",
       });
       return;
     }
