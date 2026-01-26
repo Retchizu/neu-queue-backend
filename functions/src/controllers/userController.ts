@@ -2,7 +2,8 @@ import { Request, Response } from "express";
 import { auth, firestoreDb } from "@/config/firebaseConfig";
 import { Timestamp } from "firebase-admin/firestore";
 
-export const getAdminAuthDetails = async (req: Request, res: Response): Promise<void> => {
+// Shared function for getting admin/information auth details
+const getAdminAuthDetailsInternal = async (req: Request, res: Response): Promise<void> => {
     try {
         if (!req.user) {
             res.status(401).json({
@@ -35,6 +36,9 @@ export const getAdminAuthDetails = async (req: Request, res: Response): Promise<
         });
     }
 };
+
+export const getAdminAuthDetails = getAdminAuthDetailsInternal;
+export const getInformationAuthDetails = getAdminAuthDetailsInternal;
 
 export const getCashierAuthDetails = async (req: Request, res: Response): Promise<void> => {
     try {

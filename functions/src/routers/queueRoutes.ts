@@ -29,7 +29,7 @@ router.get("/queue", verifyCustomerSession("queue"), getQueue);
 router.get(
     "/qrcode",
     verifyAuthTokenAndDomain,
-    verifyRole(["cashier", "admin", "superAdmin"]),
+    verifyRole(["cashier", "admin", "superAdmin", "information"]),
     generateQrCode
 );
 router.get(
