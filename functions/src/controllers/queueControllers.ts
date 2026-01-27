@@ -73,15 +73,8 @@ export const getQueueAccess = async (req: Request, res: Response) => {
             issuedAt: Date.now(),
             expiresAt,
         });
-        // create session and redirect
-        res.cookie("session", sessionId, {
-            httpOnly: true,
-            secure: true,
-            sameSite: "strict",
-            maxAge: 8 * 60 * 60 * 1000,
-        });
 
-       res.status(200).json({path: data.type === "form"? "/form" : "/queue"});
+       res.status(200).json({path: data.type === "form"? "/form" : "/queue", sessionId});
         return;
     } catch (error) {
         res.status(403).json({ message: (error as Error).message });
