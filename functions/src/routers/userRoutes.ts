@@ -8,7 +8,11 @@ const router: Router = Router();
 
 router.get("/admin/me", verifyAuthTokenAndDomain, verifyRole(["superAdmin", "admin"]), getAdminAuthDetails);
 router.get("/cashier/me", verifyAuthTokenAndDomain, verifyRole(["cashier"]), getCashierAuthDetails);
-router.get("/information/me", verifyAuthTokenAndDomain, verifyRole(["information"]), getInformationAuthDetails);
+router.get("/information/me",
+    verifyAuthTokenAndDomain,
+    verifyRole(["information", "superAdmin", "admin"]),
+    getInformationAuthDetails
+);
 
 
 export default router;

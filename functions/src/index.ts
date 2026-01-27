@@ -9,7 +9,12 @@ import { connectRedis } from "./config/redisClient";
 dotenv.config();
 const app: Express = express();
 
-const allowedOrigins = ["http://localhost:3000", "https://localhost:3000", process.env.NEUQUEUE_ROOT_URL];
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://localhost:3000",
+  "http://localhost:3001",
+  process.env.NEUQUEUE_ROOT_URL,
+];
 
 connectRedis().catch((err) => console.error("Failed to initialize app", err));
 
