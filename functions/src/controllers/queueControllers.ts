@@ -24,7 +24,7 @@ export const generateQrCode = async (req: Request, res: Response) => {
         const qrId = uuidv4();
         const qrPayload: QrCodeDocument = {
             createdAt: FieldValue.serverTimestamp() as Timestamp,
-            expiresAt: new Date(Date.now() + 5 * 60),
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
             type: "form",
             createdBy: req.user!.uid,
         };
@@ -48,35 +48,45 @@ export const generateQrCode = async (req: Request, res: Response) => {
 };
 
 export const getQueueAccess = async (req: Request, res: Response) => {
-    const { initialQrId } = req.query;
+    try {
+        const { initialQrId } = req.query;
 
-    const initialQrData = await redisClient.get(initialQrId as string);
-    if (!initialQrData) {
-        res.status(403).send("Invalid or expired QR template");
+        const initialQrData = await redisClient.get(initialQrId as string);
+        if (!initialQrData) {
+            throw new Error("Invalid or expired QR template");
+        }
+
+        const data = JSON.parse(initialQrData);
+        // Check if token has expired
+        if (data.expiresAt) {
+            const expiresAt = new Date(data.expiresAt);
+            if (expiresAt.getTime() < Date.now()) {
+                throw new Error("Invalid or expired QR template");
+            }
+        }
+        // Generate dynamic QR ID
+        const sessionId = uuidv4();
+        const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
+
+        await firestoreDb.collection("customer-sessions").doc(sessionId).set({
+            type: data.type,
+            issuedAt: Date.now(),
+            expiresAt,
+        });
+        // create session and redirect
+        res.cookie("session", sessionId, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "strict",
+            maxAge: 8 * 60 * 60 * 1000,
+        });
+
+       res.status(200).json({path: data.type === "form"? "/form" : "/queue"});
+        return;
+    } catch (error) {
+        res.status(403).json({ message: (error as Error).message });
         return;
     }
-    const data = JSON.parse(initialQrData);
-
-    // Generate dynamic QR ID
-    const sessionId = uuidv4();
-    const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-
-    await firestoreDb.collection("customer-sessions").doc(sessionId).set({
-        type: data.type,
-        issuedAt: Date.now(),
-        expiresAt,
-    });
-
-    // create session and redirect
-    res.cookie("session", sessionId, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict",
-        maxAge: 8 * 60 * 60 * 1000,
-    });
-
-    res.redirect(data.type === "queue" ? "/queue" : "/form");
-    return;
 };
 
 export const joinQueue = async (req: Request, res: Response) => {

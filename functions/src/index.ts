@@ -14,6 +14,7 @@ const allowedOrigins = [
   "https://localhost:3000",
   "http://localhost:3001",
   process.env.NEUQUEUE_ROOT_URL,
+  "http://192.168.1.40",
 ];
 
 connectRedis().catch((err) => console.error("Failed to initialize app", err));
