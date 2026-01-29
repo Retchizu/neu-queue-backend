@@ -101,6 +101,33 @@ export const getCounters = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
+export const getAssignedCounter = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { uid } = req.body;
+
+    if (!uid) {
+      res.status(400).json({ message: "uid is required in request body" });
+      return;
+    }
+
+    const counterSnapshot = await firestoreDb
+      .collection("counters")
+      .where("cashierUid", "==", uid)
+      .get();
+
+    const counters: Counter[] = counterSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }) as Counter);
+
+    res.status(200).json({ counters });
+    return;
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+    return;
+  }
+};
+
 export const getCountersByStation = async (req: Request, res: Response): Promise<void> => {
   try {
     const { stationId } = req.params;

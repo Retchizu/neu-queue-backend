@@ -5,6 +5,7 @@ import {
     addCounter,
     deleteCounter,
     enterCounter,
+    getAssignedCounter,
     getCounters,
     getCountersByStation,
     updateCounter,
@@ -18,6 +19,7 @@ router.use(verifyAuthTokenAndDomain);
 
 router.post("/", verifyRole(["admin", "superAdmin"]), addCounter);
 router.get("/", verifyRole(["admin", "superAdmin"]), getCounters);
+router.post("/assigned", getAssignedCounter);
 router.get("/:stationId", verifyRole(["admin", "superAdmin", "cashier"]), getCountersByStation);
 router.delete("/:counterId", verifyRole(["admin", "superAdmin"]), deleteCounter);
 router.put("/:counterId", verifyRole(["admin", "superAdmin"]), updateCounter);

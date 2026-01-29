@@ -295,3 +295,13 @@ export const getAssignedStation = async (
     return;
   }
 };
+
+export const getAvailableStations = async (req: Request, res: Response) => {
+  try {
+    //
+  } catch (error) {
+    res.status(500).json({message: (error as Error).message});
+    return;
+  }
+};
+

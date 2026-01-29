@@ -13,6 +13,8 @@ const allowedOrigins = [
   "http://localhost:3000",
   "https://localhost:3000",
   "http://localhost:3001",
+  "http://localhost:3002",
+  "http://localhost:3003",
   process.env.NEUQUEUE_ROOT_URL,
   "http://192.168.1.40",
 ];
