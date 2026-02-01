@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
 import { getAdminAuthDetails, getCashierAuthDetails, getInformationAuthDetails } from "../controllers/userController";
-import { verifyRole } from "@/middlewares/verifyRole";
+import { verifyRole } from "../middlewares/verifyRole";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();

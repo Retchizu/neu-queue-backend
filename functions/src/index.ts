@@ -1,4 +1,3 @@
-import "./register-paths";
 import * as v2 from "firebase-functions/v2";
 import express, { Express } from "express";
 import dotenv from "dotenv";

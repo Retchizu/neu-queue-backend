@@ -1,5 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
-import Purpose from "@/types/purpose";
+import Purpose from "./purpose";
 
 type Station = {
     id?: string; // Document ID (auto-generated)

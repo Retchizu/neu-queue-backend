@@ -2,22 +2,22 @@ import { Request, Response } from "express";
 import QRcode from "qrcode";
 import { firestoreDb } from "../config/firebaseConfig";
 import { v4 as uuidv4 } from "uuid";
-import { QrCodeDocument } from "@/types/qrcode";
+import { QrCodeDocument } from "../types/qrcode";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import redisClient from "@/config/redisClient";
-import { joinQueueSchema } from "@/zod-schemas/join-queue-schema";
-import { startServiceSchema } from "@/zod-schemas/start-service-schema";
-import { completeServiceSchema } from "@/zod-schemas/complete-service-schema";
-import { cancelQueueSchema } from "@/zod-schemas/cancel-queue-schema";
+import redisClient from "../config/redisClient";
+import { joinQueueSchema } from "../zod-schemas/join-queue-schema";
+import { startServiceSchema } from "../zod-schemas/start-service-schema";
+import { completeServiceSchema } from "../zod-schemas/complete-service-schema";
+import { cancelQueueSchema } from "../zod-schemas/cancel-queue-schema";
 import { ZodError } from "zod";
-import Counter from "@/types/counter";
-import { Queue } from "@/types/queue";
-import Purpose from "@/types/purpose";
-import Station from "@/types/station";
+import Counter from "../types/counter";
+import { Queue } from "../types/queue";
+import Purpose from "../types/purpose";
+import Station from "../types/station";
 import {
     calculateEstimatedWaitTime,
     refreshEstimatedWaitTimesForStation,
-} from "@/utils/estimatedWaitTime";
+} from "../utils/estimatedWaitTime";
 
 
 const PURPOSE_VALUES: Purpose[] = ["payment", "clinic", "auditing", "registrar"];

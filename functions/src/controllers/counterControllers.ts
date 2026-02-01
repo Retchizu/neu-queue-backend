@@ -1,11 +1,11 @@
 import { Request, Response } from "express";
-import { counterSchema } from "@/zod-schemas/counter-schema";
+import { counterSchema } from "../zod-schemas/counter-schema";
 import { auth, firestoreDb } from "../config/firebaseConfig";
 import { recordLog } from "../utils/recordLog";
 import { ActionType } from "../types/activity-log";
 import { ZodError } from "zod";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import Counter from "@/types/counter";
+import Counter from "../types/counter";
 
 export const addCounter = async (req: Request, res: Response): Promise<void> => {
   try {

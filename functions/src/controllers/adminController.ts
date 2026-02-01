@@ -1,11 +1,11 @@
 import { Request, Response } from "express";
-import { auth, firestoreDb } from "@/config/firebaseConfig";
-import { recordLog } from "@/utils/recordLog";
-import { ActionType } from "@/types/activity-log";
-import { Blacklist } from "@/types/blacklist";
-import { blockEmailSchema } from "@/zod-schemas/blockEmail";
-import { assignRoleSchema } from "@/zod-schemas/assign-role-schema";
-import { assignCashierSchema } from "@/zod-schemas/assign-cashier-schema";
+import { auth, firestoreDb } from "../config/firebaseConfig";
+import { recordLog } from "../utils/recordLog";
+import { ActionType } from "../types/activity-log";
+import { Blacklist } from "../types/blacklist";
+import { blockEmailSchema } from "../zod-schemas/blockEmail";
+import { assignRoleSchema } from "../zod-schemas/assign-role-schema";
+import { assignCashierSchema } from "../zod-schemas/assign-cashier-schema";
 import { ZodError } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
 import { FirebaseAuthError } from "firebase-admin/auth";

@@ -1,5 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
-import { SessionType } from "@/types/token-type";
+import { SessionType } from "./token-type";
 
 
 export type QrCodeDocument = {

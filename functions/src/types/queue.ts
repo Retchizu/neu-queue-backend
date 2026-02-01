@@ -1,6 +1,6 @@
-import Purpose from "@/types/purpose";
+import Purpose from "./purpose";
 import { Timestamp } from "firebase-admin/firestore";
-import { QueueStatus } from "@/types/queue-status";
+import { QueueStatus } from "./queue-status";
 
 export type Queue = {
     id: string; // Document ID (auto-generated)

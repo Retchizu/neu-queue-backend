@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { firestoreDb } from "../config/firebaseConfig";
-import { SessionType } from "@/types/token-type";
+import { SessionType } from "../types/token-type";
 
 export const verifyCustomerSession = (sessionType: SessionType) => {
     return async (req: Request, res: Response, next: NextFunction) => {

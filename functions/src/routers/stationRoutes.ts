@@ -7,8 +7,8 @@ import {
     getStation,
     getStations,
     updateStation,
-} from "@/controllers/stationControllers";
-import { verifyAuthTokenAndDomain } from "@/middlewares/verifyAuthTokenAndDomain";
+} from "../controllers/stationControllers";
+import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();

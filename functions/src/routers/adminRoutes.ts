@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { verifyAuthTokenAndDomain } from "@/middlewares/verifyAuthTokenAndDomain";
-import { verifyRole } from "@/middlewares/verifyRole";
+import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
+import { verifyRole } from "../middlewares/verifyRole";
 import {
   assignUserRole,
   assignCashier,
@@ -14,7 +14,7 @@ import {
   getPendingUsers,
   getUserData,
   removeBlacklistedEmail,
-} from "@/controllers/adminController";
+} from "../controllers/adminController";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();

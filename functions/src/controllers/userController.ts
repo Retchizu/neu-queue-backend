@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { auth, firestoreDb } from "@/config/firebaseConfig";
+import { auth, firestoreDb } from "../config/firebaseConfig";
 import { Timestamp } from "firebase-admin/firestore";
 
 // Shared function for getting admin/information auth details

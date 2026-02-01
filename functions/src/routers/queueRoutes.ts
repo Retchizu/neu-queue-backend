@@ -13,10 +13,10 @@ import {
     joinQueue,
     markNoShow,
     startService,
-} from "@/controllers/queueControllers";
-import { verifyAuthTokenAndDomain } from "@/middlewares/verifyAuthTokenAndDomain";
-import { verifyRole } from "@/middlewares/verifyRole";
-import { verifyCustomerSession } from "@/middlewares/verifyCustomerSession";
+} from "../controllers/queueControllers";
+import { verifyAuthTokenAndDomain } from "../middlewares/verifyAuthTokenAndDomain";
+import { verifyRole } from "../middlewares/verifyRole";
+import { verifyCustomerSession } from "../middlewares/verifyCustomerSession";
 
 // eslint-disable-next-line new-cap
 const router: Router = Router();
