@@ -344,8 +344,8 @@ export const enterCounter = async (req: Request, res: Response): Promise<void> =
 
     const counterData = counterSnapshot.data() as Counter;
 
-    // Check if counter is already occupied
-    if (counterData.cashierUid) {
+    // Check if counter is already occupied (allow re-entry if current user is the cashier)
+    if (counterData.cashierUid && counterData.cashierUid !== req.user!.uid) {
       res.status(409).json({ message: "Counter is already occupied" });
       return;
     }

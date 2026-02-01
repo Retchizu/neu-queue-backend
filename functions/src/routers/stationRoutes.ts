@@ -21,7 +21,7 @@ router.get("/assigned", verifyRole(["cashier"]), getAssignedStation);
 // Admin routes
 router.post("/", verifyRole(["admin", "superAdmin"]), addStation);
 router.get("/", verifyRole(["admin", "superAdmin"]), getStations);
-router.get("/:stationId", verifyRole(["admin", "superAdmin"]), getStation);
+router.get("/:stationId", verifyRole(["admin", "superAdmin", "cashier"]), getStation);
 router.delete("/:stationId", verifyRole(["admin", "superAdmin"]), deleteStation);
 router.put("/:stationId", verifyRole(["admin", "superAdmin"]), updateStation);
 

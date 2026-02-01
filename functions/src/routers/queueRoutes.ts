@@ -3,6 +3,9 @@ import {
     cancelQueue,
     completeService,
     generateQrCode,
+    getAvailableStations,
+    getCounter,
+    getCurrentServing,
     getQueue,
     getQueueAccess,
     getQueuesByCounter,
@@ -24,6 +27,7 @@ router.get("/queue-access", getQueueAccess);
 // Customer routes - use verifyCustomerSession
 router.post("/join", verifyCustomerSession("form"), joinQueue);
 router.get("/queue", verifyCustomerSession("queue"), getQueue);
+router.get("/counters/:counterId", verifyCustomerSession("queue"), getCounter);
 
 // Cashier/Admin routes - use verifyAuthTokenAndDomain and verifyRole
 router.get(
@@ -31,6 +35,11 @@ router.get(
     verifyAuthTokenAndDomain,
     verifyRole(["cashier", "admin", "superAdmin", "information"]),
     generateQrCode
+);
+router.get(
+    "/available-stations",
+    verifyCustomerSession("form"),
+    getAvailableStations
 );
 router.get(
     "/station/:stationId",
@@ -43,6 +52,12 @@ router.get(
     verifyAuthTokenAndDomain,
     verifyRole(["cashier", "admin", "superAdmin"]),
     getQueuesByCounter
+);
+router.get(
+    "/counter/:counterId/current-serving",
+    verifyAuthTokenAndDomain,
+    verifyRole(["cashier", "admin", "superAdmin"]),
+    getCurrentServing
 );
 router.post(
     "/:queueId/start-service",
@@ -58,8 +73,7 @@ router.post(
 );
 router.post(
     "/:queueId/cancel",
-    verifyAuthTokenAndDomain,
-    verifyRole(["cashier", "admin", "superAdmin"]),
+    verifyCustomerSession("queue"),
     cancelQueue
 );
 router.post(

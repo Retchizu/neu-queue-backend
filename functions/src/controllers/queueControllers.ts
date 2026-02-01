@@ -10,7 +10,17 @@ import { startServiceSchema } from "@/zod-schemas/start-service-schema";
 import { completeServiceSchema } from "@/zod-schemas/complete-service-schema";
 import { cancelQueueSchema } from "@/zod-schemas/cancel-queue-schema";
 import { ZodError } from "zod";
+import Counter from "@/types/counter";
 import { Queue } from "@/types/queue";
+import Purpose from "@/types/purpose";
+import Station from "@/types/station";
+import {
+    calculateEstimatedWaitTime,
+    refreshEstimatedWaitTimesForStation,
+} from "@/utils/estimatedWaitTime";
+
+
+const PURPOSE_VALUES: Purpose[] = ["payment", "clinic", "auditing", "registrar"];
 
 const SECRET_KEY = process.env.JWT_SECRET;
 const NEUQUEUE_ROOT_URL = process.env.NEUQUEUE_ROOT_URL;
@@ -148,12 +158,18 @@ export const joinQueue = async (req: Request, res: Response) => {
             "0"
         )}`;
 
+        const estimatedWaitTime = await calculateEstimatedWaitTime(
+            stationId,
+            position
+        );
+
         await queueRef.doc().set({
             stationId,
             customerEmail: email,
             queueNumber,
             purpose,
             position,
+            estimatedWaitTime,
             createdAt: FieldValue.serverTimestamp(),
             status: "waiting",
             qrId,
@@ -162,8 +178,8 @@ export const joinQueue = async (req: Request, res: Response) => {
             message: `${email} joins ${stationData.name} successfully.`,
             queueNumber,
             position,
+            estimatedWaitTime,
         });
-        res.redirect("/queue");
         return;
     } catch (error) {
         if (error instanceof ZodError) {
@@ -316,6 +332,101 @@ export const getQueuesByStation = async (req: Request, res: Response) => {
             queues,
             nextCursor,
         });
+        return;
+    } catch (error) {
+        res.status(500).json({ message: (error as Error).message });
+        return;
+    }
+};
+
+export const getCurrentServing = async (req: Request, res: Response) => {
+    try {
+        const { counterId } = req.params;
+
+        if (!counterId) {
+            res.status(400).json({ message: "counterId is required" });
+            return;
+        }
+
+        // Verify counter exists
+        const counterDoc = await firestoreDb
+            .collection("counters")
+            .doc(counterId)
+            .get();
+
+        if (!counterDoc.exists) {
+            res.status(404).json({ message: "Counter not found" });
+            return;
+        }
+
+        // Query queue collection for the currently serving entry at this counter
+        const queueSnapshot = await firestoreDb
+            .collection("queue")
+            .where("counterId", "==", counterId)
+            .where("status", "==", "serving")
+            .limit(1)
+            .get();
+
+        if (queueSnapshot.empty) {
+            res.status(200).json({ currentServing: null });
+            return;
+        }
+
+        const queueDoc = queueSnapshot.docs[0];
+        const queueData = queueDoc.data();
+
+        const queue: Queue = {
+            id: queueDoc.id,
+            stationId: queueData.stationId,
+            counterId: queueData.counterId,
+            queueNumber: queueData.queueNumber,
+            purpose: queueData.purpose,
+            customerEmail: queueData.customerEmail,
+            status: queueData.status,
+            position: queueData.position,
+            estimatedWaitTime: queueData.estimatedWaitTime,
+            qrId: queueData.qrId,
+            createdAt: queueData.createdAt,
+            servedAt: queueData.servedAt,
+            servedBy: queueData.servedBy,
+            completedAt: queueData.completedAt,
+            cancelledAt: queueData.cancelledAt,
+            cancelledBy: queueData.cancelledBy,
+        };
+
+        res.status(200).json({ currentServing: queue });
+        return;
+    } catch (error) {
+        res.status(500).json({ message: (error as Error).message });
+        return;
+    }
+};
+
+export const getCounter = async (req: Request, res: Response) => {
+    try {
+        const { counterId } = req.params;
+
+        if (!counterId) {
+            res.status(400).json({ message: "counterId is required" });
+            return;
+        }
+
+        const counterDoc = await firestoreDb
+            .collection("counters")
+            .doc(counterId)
+            .get();
+
+        if (!counterDoc.exists) {
+            res.status(404).json({ message: "Counter not found" });
+            return;
+        }
+
+        const counter: Counter = {
+            id: counterDoc.id,
+            ...counterDoc.data(),
+        } as Counter;
+
+        res.status(200).json(counter);
         return;
     } catch (error) {
         res.status(500).json({ message: (error as Error).message });
@@ -541,6 +652,14 @@ export const completeService = async (req: Request, res: Response) => {
             });
         }
 
+        // Refresh estimated wait times for remaining customers at this station
+        const stationId = queueData?.stationId as string | undefined;
+        if (stationId) {
+            await refreshEstimatedWaitTimesForStation(stationId).catch(() => {
+                // Non-blocking: log but don't fail the request
+            });
+        }
+
         // Get updated queue data
         const updatedQueueDoc = await queueRef.get();
         const updatedQueueData = updatedQueueDoc.data();
@@ -573,7 +692,7 @@ export const completeService = async (req: Request, res: Response) => {
 export const cancelQueue = async (req: Request, res: Response) => {
     try {
         const { queueId } = req.params;
-        cancelQueueSchema.parse(req.body);
+        const {reason} = cancelQueueSchema.parse(req.body);
 
         if (!queueId) {
             res.status(400).json({ message: "queueId is required" });
@@ -601,11 +720,10 @@ export const cancelQueue = async (req: Request, res: Response) => {
 
         // Update queue to cancelled
         const cancelledAt = FieldValue.serverTimestamp() as Timestamp;
-        const cancelledBy = req.user?.uid;
         await queueRef.update({
             status: "cancelled",
+            reason,
             cancelledAt,
-            cancelledBy,
         });
 
         // Revoke the corresponding customer-session
@@ -617,6 +735,16 @@ export const cancelQueue = async (req: Request, res: Response) => {
                 used: true,
                 status: "completed",
             });
+        }
+
+        // Refresh estimated wait times for remaining customers at this station
+        const cancelledStationId = queueData?.stationId as string | undefined;
+        if (cancelledStationId) {
+            await refreshEstimatedWaitTimesForStation(cancelledStationId).catch(
+                () => {
+                    // Non-blocking: log but don't fail the request
+                }
+            );
         }
 
         // Get updated queue data
@@ -759,6 +887,77 @@ export const markNoShow = async (req: Request, res: Response) => {
             success: true,
             data: responseData,
         });
+        return;
+    } catch (error) {
+        res.status(500).json({ message: (error as Error).message });
+        return;
+    }
+};
+
+
+type StationWithEstimatedWait = Station & { estimatedWaitTime: number };
+
+export const getAvailableStations = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const purpose = req.query.purpose as string | undefined;
+        if (!purpose || !PURPOSE_VALUES.includes(purpose as Purpose)) {
+            res.status(400).json({
+                message: `Invalid or missing type. Must be one of: ${PURPOSE_VALUES.join(", ")}`,
+            });
+            return;
+        }
+
+        const [stationsSnapshot, countersSnapshot] = await Promise.all([
+            firestoreDb
+                .collection("stations")
+                .where("type", "==", purpose)
+                .get(),
+            firestoreDb
+                .collection("counters")
+                .where("cashierUid", "!=", null)
+                .get(),
+        ]);
+
+        const stationIdsWithCashier = new Set<string>();
+        countersSnapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            if (data.cashierUid != null && data.cashierUid !== "") {
+                const stationId = data.stationId as string;
+                if (stationId) stationIdsWithCashier.add(stationId);
+            }
+        });
+
+        const filteredStations = stationsSnapshot.docs
+            .filter((doc) => stationIdsWithCashier.has(doc.id))
+            .map((doc) => ({
+                id: doc.id,
+                ...doc.data(),
+            } as Station))
+            .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+        const stations: StationWithEstimatedWait[] = await Promise.all(
+            filteredStations.map(async (station) => {
+                const stationId = station.id!;
+                const queueLengthSnapshot = await firestoreDb
+                    .collection("queue")
+                    .where("stationId", "==", stationId)
+                    .where("status", "in", ["waiting", "serving"])
+                    .count()
+                    .get();
+                const queueLength = queueLengthSnapshot.data().count ?? 0;
+                const position = queueLength + 1;
+                const estimatedWaitTime = await calculateEstimatedWaitTime(
+                    stationId,
+                    position
+                );
+                return { ...station, estimatedWaitTime };
+            })
+        );
+
+        res.status(200).json({ stations });
         return;
     } catch (error) {
         res.status(500).json({ message: (error as Error).message });
