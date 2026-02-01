@@ -9,13 +9,12 @@ dotenv.config();
 const app: Express = express();
 
 const allowedOrigins = [
-  "http://localhost:3000",
-  "https://localhost:3000",
-  "http://localhost:3001",
+  "https://en-queue-customer.vercel.app",
+  "https://en-queue-information.vercel.app",
+  "https://enqueue-alpha.vercel.app",
+  "https://en-queue-cashier.vercel.app",
+  "http://localhost:3004",
   "http://localhost:3002",
-  "http://localhost:3003",
-  process.env.NEUQUEUE_ROOT_URL,
-  "http://192.168.1.40",
 ];
 
 connectRedis().catch((err) => console.error("Failed to initialize app", err));

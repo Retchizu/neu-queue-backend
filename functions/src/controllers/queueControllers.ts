@@ -145,7 +145,7 @@ export const joinQueue = async (req: Request, res: Response) => {
         const queueLength = waitingQueueSnapshot.size;
         const position = queueLength + 1;
 
-        // Generate queue number based on purpose and position
+        // Generate unique queue number from per-station sequence (not position-based)
         const purposeAbbreviation: Record<string, string> = {
             payment: "PAY",
             clinic: "CLI",
@@ -153,7 +153,18 @@ export const joinQueue = async (req: Request, res: Response) => {
             registrar: "REG",
         };
         const abbreviation = purposeAbbreviation[purpose] || "QUE";
-        const queueNumber = `${abbreviation}-${String(position).padStart(
+        const counterRef = firestoreDb
+            .collection("queue-number-counters")
+            .doc(stationId);
+        const nextSequenceNumber = await firestoreDb.runTransaction(
+            async (transaction) => {
+                const counterDoc = await transaction.get(counterRef);
+                const next = (counterDoc.data()?.lastNumber ?? 0) + 1;
+                transaction.set(counterRef, { lastNumber: next }, { merge: true });
+                return next;
+            }
+        );
+        const queueNumber = `${abbreviation}-${String(nextSequenceNumber).padStart(
             3,
             "0"
         )}`;
@@ -815,7 +826,6 @@ export const markNoShow = async (req: Request, res: Response) => {
             .where("status", "in", ["waiting", "serving"])
             .orderBy("position", "asc");
 
-        const remainingQueuesSnapshot = await remainingQueuesRef.get();
 
         // Update queue to no-show
         const cancelledAt = FieldValue.serverTimestamp() as Timestamp;
@@ -825,6 +835,8 @@ export const markNoShow = async (req: Request, res: Response) => {
             cancelledAt,
             cancelledBy,
         });
+
+        const remainingQueuesSnapshot = await remainingQueuesRef.get();
 
         // Recalculate positions for remaining queues in the same station
         if (stationId && currentPosition && remainingQueuesSnapshot.docs.length > 0) {
