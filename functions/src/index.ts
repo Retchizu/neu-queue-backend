@@ -13,8 +13,6 @@ const allowedOrigins = [
   "https://en-queue-information.vercel.app",
   "https://enqueue-alpha.vercel.app",
   "https://en-queue-cashier.vercel.app",
-  "http://localhost:3004",
-  "http://localhost:3002",
 ];
 
 connectRedis().catch((err) => console.error("Failed to initialize app", err));
