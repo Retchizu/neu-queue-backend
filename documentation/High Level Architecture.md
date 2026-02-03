@@ -216,7 +216,9 @@ flowchart TD
         A6 --> A4
         A7 --> A8["👨‍💼 Go to Counter<br/>Get Service"]
         A8 --> A9["✅ Service Complete"]
-    end    subgraph cashier["👨‍💼 CASHIER"]
+    end
+
+    subgraph cashier["👨‍💼 CASHIER"]
         B1["🔐 Login to System"] --> B2["📍 Select Assigned<br/>Station/Counter"]
         B2 --> B3["📋 View Waiting Queue<br/>See Students in Line"]
         B3 --> B4{"Next Student<br/>Ready?"}
@@ -229,7 +231,9 @@ flowchart TD
         B8 --> B4
         B9 --> B4
         B10 --> B4
-    end    subgraph admin["👔 ADMIN / MANAGER"]
+    end
+
+    subgraph admin["👔 ADMIN / MANAGER"]
         C1["🔐 Login to Admin Portal"] --> C2{"What to Manage?"}
         C2 -->|"Stations"| C3["🏢 Manage Service Stations<br/>Add/Edit/Remove"]
         C2 -->|"Counters"| C4["🏪 Manage Counters<br/>Add/Edit/Remove"]
@@ -245,10 +249,11 @@ flowchart TD
         C7 --> C2
         C8 --> C2
         C9 --> C2
-    end    %% Connections between flows
+    end
+    %% Connections between flows
     A9 -.->|"Updates Queue"| B4
     B5 -.->|"Notifies Student"| A7
-    C6 -.->|"Assigns"| B2    style student fill:#e1f5ff
+    C6 -.->|"Assigns"| B2
+    style student fill:#e1f5eff
     style cashier fill:#fff4e1
-    style admin fill:#e8f5e9
-```
+    style admin fill:#e8f5e9```
